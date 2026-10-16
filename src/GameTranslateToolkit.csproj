@@ -5,7 +5,7 @@
     <OutputType>WinExe</OutputType>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.7.6</Version>
+    <Version>0.7.7</Version>
     <AssemblyName>RikaTranslator</AssemblyName>
     <RootNamespace>GameTranslateToolkit</RootNamespace>
     <Title>Rika Translator</Title>
@@ -26,6 +26,7 @@
     <Content Include="adapters\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Remove="licenses\**\*" />
     <Content Include="licenses\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Remove="validation\**\*" />
     <Compile Remove="tests\**\*" />
     <Content Remove="tests\**\*" />
     <None Remove="tests\**\*" />

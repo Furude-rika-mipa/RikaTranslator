@@ -76,9 +76,13 @@ internal static class Program
     private static async Task<bool> CheckHealthAsync(UpdatePlan plan, string session, CancellationToken ct)
     {
         var folder = Path.Combine(session, "health"); Directory.CreateDirectory(folder);
-        var data = Path.Combine(folder, "data"); Directory.CreateDirectory(data);
-        var settings = Path.Combine(plan.DataDirectory, "settings.json"); UpdatePackage.RejectLinks(settings);
-        if (File.Exists(settings)) File.Copy(settings, Path.Combine(data, "settings.json"), false);
+        var data = plan.DataDirectory;
+        if (plan.CreateBackup)
+        {
+            data = Path.Combine(folder, "data"); Directory.CreateDirectory(data);
+            var settings = Path.Combine(plan.DataDirectory, "settings.json"); UpdatePackage.RejectLinks(settings);
+            if (File.Exists(settings)) File.Copy(settings, Path.Combine(data, "settings.json"), false);
+        }
         var marker = Path.Combine(folder, "ready.json");
         var start = new ProcessStartInfo(Path.Combine(plan.TargetDirectory, "RikaTranslator.exe")) { UseShellExecute = false, WorkingDirectory = plan.TargetDirectory, CreateNoWindow = true };
         foreach (var value in new[] { "--server", "--data-dir", data, "--port", "0", "--update-health-file", marker, "--expected-version", plan.TargetVersion }) start.ArgumentList.Add(value);
@@ -102,7 +106,7 @@ internal sealed class UpdateWindow : Form
     private bool _finished;
     public UpdateWindow(UpdatePlan plan, bool restore)
     {
-        Text = "Rika Translator · 本地更新"; Size = new Size(540, 220); StartPosition = FormStartPosition.CenterScreen;
+        Text = "Rika Translator · 程序更新"; Size = new Size(540, 220); StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
         Font = new Font("Microsoft YaHei UI", 10); Controls.Add(_message); Controls.Add(_bar);
         FormClosing += (_, e) => e.Cancel = !_finished;
@@ -113,7 +117,7 @@ internal sealed class UpdateWindow : Form
                 var result = await Program.RunAsync(plan, restore, text => { if (!IsDisposed) BeginInvoke(() => _message.Text = text); });
                 _finished = true; _bar.Visible = false; _message.Text = result.Message;
                 if (result.Status == "success" && result.RestartedProcessId != null) Close();
-                else MessageBox.Show(this, result.Message + "\n\n旧程序备份：" + result.BackupDirectory, "本地更新结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                else MessageBox.Show(this, result.Message + (string.IsNullOrEmpty(result.BackupDirectory) ? "" : "\n\n旧程序备份：" + result.BackupDirectory), "程序更新结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex) { _finished = true; _bar.Visible = false; _message.Text = "更新未完成：" + ex.Message; }
         };

@@ -12,6 +12,7 @@ public sealed class UpdatePreview
     public int FileCount { get; set; }
     public long PackageSize { get; set; }
     public long ExpandedSize { get; set; }
+    public bool CreateBackup { get; set; }
 }
 
 public sealed class LocalUpdateService
@@ -53,6 +54,7 @@ public sealed class LocalUpdateService
         }
         catch { /* A damaged report must not hide the update entry point. */ }
         var recovery = new List<object>();
+        var repair = new List<object>();
         var sessions = Path.Combine(_data, "updates");
         if (Directory.Exists(sessions))
             foreach (var folder in Directory.EnumerateDirectories(sessions).Take(200))
@@ -62,13 +64,14 @@ public sealed class LocalUpdateService
                     var path = Path.Combine(folder, "journal.json"); UpdatePackage.RejectLinks(path);
                     if (!File.Exists(path) || new FileInfo(path).Length > 4 * 1024 * 1024) continue;
                     var journal = JsonSerializer.Deserialize<UpdateJournal>(File.ReadAllText(path), UpdatePackage.Json);
-                    if (journal?.State is "applying" or "rollback-failed") recovery.Add(new { plan.Id, plan.CurrentVersion, plan.TargetVersion });
+                    if (journal?.State is "applying" or "repair-required" && !plan.CreateBackup) repair.Add(new { plan.Id, plan.TargetVersion });
+                    else if (journal?.State is "applying" or "rollback-failed") recovery.Add(new { plan.Id, plan.CurrentVersion, plan.TargetVersion });
                 }
                 catch { }
-        return new { currentVersion = Program.Version, architecture = "win-x64", lastResult = result, recovery, scheduled = Scheduled };
+        return new { currentVersion = Program.Version, architecture = "win-x64", lastResult = result, recovery, repair, scheduled = Scheduled };
     }
 
-    public async Task<UpdatePreview> InspectAsync(string input, CancellationToken ct)
+    public async Task<UpdatePreview> InspectAsync(string input, CancellationToken ct, bool createBackup = false)
     {
         await _gate.WaitAsync(ct);
         try
@@ -78,7 +81,7 @@ public sealed class LocalUpdateService
             var path = Path.GetFullPath(input.Trim().Trim('"'));
             if (!Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase) || !File.Exists(path)) throw new InvalidDataException("请选择存在的 ZIP 更新包。");
             UpdatePackage.RejectLinks(path);
-            var plan = new UpdatePlan { Id = Guid.NewGuid().ToString("N"), TargetDirectory = _root, DataDirectory = _data, CurrentVersion = Program.Version, RestartArguments = _restartArguments };
+            var plan = new UpdatePlan { Id = Guid.NewGuid().ToString("N"), TargetDirectory = _root, DataDirectory = _data, CurrentVersion = Program.Version, RestartArguments = _restartArguments, CreateBackup = createBackup };
             var session = UpdateInstaller.Session(plan); UpdatePackage.RejectLinks(session); Directory.CreateDirectory(session);
             var package = Path.Combine(session, "package.zip");
             try
@@ -95,7 +98,7 @@ public sealed class LocalUpdateService
                 plan.TargetVersion = manifest.Version; plan.PackageHash = UpdatePackage.Hash(package);
                 _pending = plan;
                 _logs.Write("info", "update", "本地更新包校验通过，等待用户确认。", details: new { fromVersion = plan.CurrentVersion, targetVersion = plan.TargetVersion, files = manifest.Files.Count });
-                return new UpdatePreview { Id = plan.Id, CurrentVersion = plan.CurrentVersion, TargetVersion = manifest.Version, ReleaseNotes = manifest.ReleaseNotes, FileCount = manifest.Files.Count, PackageSize = new FileInfo(package).Length, ExpandedSize = manifest.Files.Sum(f => f.Size) };
+                return new UpdatePreview { Id = plan.Id, CurrentVersion = plan.CurrentVersion, TargetVersion = manifest.Version, ReleaseNotes = manifest.ReleaseNotes, FileCount = manifest.Files.Count, PackageSize = new FileInfo(package).Length, ExpandedSize = manifest.Files.Sum(f => f.Size), CreateBackup = plan.CreateBackup };
             }
             catch { if (File.Exists(package)) File.Delete(package); throw; }
         }
@@ -140,15 +143,16 @@ public sealed class LocalUpdateService
                     var runtimeLayout = UpdatePackage.DetectLayout(_root) == "runtime";
                     var runnerFiles = runtimeLayout ? Directory.GetFiles(Path.Combine(_root, "runtime"), "*", SearchOption.AllDirectories).Append(Path.Combine(_root, "RikaUpdater.exe")).ToArray() : Directory.GetFiles(_root, "*.dll").Concat(new[] { "RikaUpdater.exe", "RikaUpdater.deps.json", "RikaUpdater.runtimeconfig.json" }.Select(n => Path.Combine(_root, n))).ToArray();
                     if (runnerFiles.Any(f => !File.Exists(f))) throw new InvalidOperationException("独立更新程序不完整，请先解压完整便携版。");
-                    var oldBytes = manifest.Files.Concat(manifest.RemoveFiles).Sum(f => File.Exists(UpdatePackage.Target(_root, f.Path)) ? new FileInfo(UpdatePackage.Target(_root, f.Path)).Length : 0L);
+                    var oldBytes = plan.CreateBackup ? manifest.Files.Concat(manifest.RemoveFiles).Sum(f => File.Exists(UpdatePackage.Target(_root, f.Path)) ? new FileInfo(UpdatePackage.Target(_root, f.Path)).Length : 0L) : 0L;
                     var required = manifest.Files.Sum(f => f.Size) + oldBytes + runnerFiles.Sum(f => new FileInfo(f).Length) + 64L * 1024 * 1024;
-                    if (new DriveInfo(Path.GetPathRoot(_data)!).AvailableFreeSpace < required) throw new IOException("数据目录所在磁盘空间不足，无法保存解包文件和旧程序备份。");
+                    if (new DriveInfo(Path.GetPathRoot(_data)!).AvailableFreeSpace < required) throw new IOException("数据目录所在磁盘空间不足，无法准备更新文件。");
                     if (new DriveInfo(Path.GetPathRoot(_root)!).AvailableFreeSpace < manifest.Files.Max(f => f.Size) + 64L * 1024 * 1024) throw new IOException("程序所在磁盘空间不足。");
                     UpdatePackage.RejectLinks(runner); Directory.CreateDirectory(runner);
                     foreach (var file in runnerFiles) { var target = UpdatePackage.Target(runner, Path.GetRelativePath(_root, file).Replace('\\', '/')); UpdatePackage.RejectLinks(file); Directory.CreateDirectory(Path.GetDirectoryName(target)!); File.Copy(file, target, true); }
                 }
                 else
                 {
+                    if (!plan.CreateBackup) throw new InvalidOperationException("此更新没有旧程序备份，请使用完整程序包修复。");
                     var journal = JsonSerializer.Deserialize<UpdateJournal>(File.ReadAllText(Path.Combine(session, "journal.json")), UpdatePackage.Json);
                     if (journal?.State is not ("applying" or "rollback-failed")) throw new InvalidOperationException("此任务不需要恢复。");
                 }
@@ -183,6 +187,46 @@ public sealed class LocalUpdateService
             catch { lock (_requests) _scheduled = false; throw; }
         }
         finally { _gate.Release(); }
+    }
+
+    public async Task CleanupCompletedAsync(CancellationToken ct)
+    {
+        // Allow the independent updater to exit after starting this application.
+        await Task.Delay(TimeSpan.FromSeconds(8), ct);
+        var sessions = Path.Combine(_data, "updates");
+        if (!Directory.Exists(sessions)) return;
+        foreach (var folder in Directory.EnumerateDirectories(sessions).Take(200))
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var plan = ReadPlan(Path.GetFileName(folder));
+                if (plan.CreateBackup) continue;
+                var journalPath = Path.Combine(folder, "journal.json"); UpdatePackage.RejectLinks(journalPath);
+                if (!File.Exists(journalPath) || new FileInfo(journalPath).Length > 4 * 1024 * 1024) continue;
+                var journal = JsonSerializer.Deserialize<UpdateJournal>(File.ReadAllText(journalPath), UpdatePackage.Json);
+                if (journal?.State != "complete") continue;
+                var ready = Path.Combine(folder, "runner-ready.json"); UpdatePackage.RejectLinks(ready);
+                if (File.Exists(ready))
+                {
+                    var pid = JsonDocument.Parse(File.ReadAllText(ready)).RootElement.GetProperty("processId").GetInt32();
+                    try { using var helper = Process.GetProcessById(pid); if (!helper.HasExited) continue; }
+                    catch (ArgumentException) { }
+                }
+                foreach (var name in new[] { "package.zip", "payload", "runner", "health" })
+                    RemoveTemporary(UpdatePackage.Target(folder, name));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException or ArgumentException) { }
+        }
+    }
+
+    internal static void RemoveTemporary(string path)
+    {
+        UpdatePackage.RejectLinks(path);
+        if (File.Exists(path)) { File.Delete(path); return; }
+        if (!Directory.Exists(path)) return;
+        foreach (var child in Directory.EnumerateFileSystemEntries(path)) RemoveTemporary(child);
+        Directory.Delete(path, false);
     }
 
     private UpdatePlan ReadPlan(string id)

@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using GameTranslateToolkit.Updates;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -9,10 +11,12 @@ internal sealed class ToolkitWindow : Form
     private readonly string _url;
     private readonly string _dataDirectory;
     private readonly LogService _logs;
+    private readonly Action<string> _openExternalLink;
     public static ToolkitWindow? Current { get; private set; }
-    public ToolkitWindow(string url, string dataDirectory, LogService logs)
+    public ToolkitWindow(string url, string dataDirectory, LogService logs, Action<string>? openExternalLink = null)
     {
         Current = this; _url = url; _dataDirectory = dataDirectory; _logs = logs;
+        _openExternalLink = openExternalLink ?? (uri => { using var process = Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true }); });
         Text = $"{Program.DisplayName} {Program.Version}";
         using (var iconStream = typeof(ToolkitWindow).Assembly.GetManifestResourceStream("GameTranslateToolkit.RikaIcon"))
         {
@@ -40,7 +44,19 @@ internal sealed class ToolkitWindow : Form
             {
                 if (!args.Uri.StartsWith(_url + "/", StringComparison.Ordinal)) args.Cancel = true;
             };
-            _browser.CoreWebView2.NewWindowRequested += (_, args) => args.Handled = true;
+            _browser.CoreWebView2.NewWindowRequested += (_, args) =>
+            {
+                args.Handled = true;
+                // Keep the local UI in WebView2; open only the clicked official release page externally.
+                if (!args.IsUserInitiated || args.Uri != OnlineUpdateService.ReleasesUrl) return;
+                try { _openExternalLink(OnlineUpdateService.ReleasesUrl); }
+                catch
+                {
+                    _logs.Write("warning", "app", "无法打开系统默认浏览器，请手动访问 GitHub 发布页。");
+                    MessageBox.Show(this, "无法打开系统默认浏览器。请复制以下地址到浏览器访问：\n" + OnlineUpdateService.ReleasesUrl,
+                        "查看发布页", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            };
             try
             {
                 // Only clear downloaded UI resources, preserving settings and browser storage.

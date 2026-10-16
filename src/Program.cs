@@ -96,7 +96,8 @@ internal static class Program
         catch (Exception ex)
         {
             var safeMessage = ex is InvalidDataException ? ex.Message : ex is IOException || ex is System.Net.Sockets.SocketException ? "无法启动本地服务或写入数据目录。请检查目录权限，确认工具没有重复打开，或检查端口是否被占用。" : ex.Message;
-            try { Directory.CreateDirectory(dataDirectory); File.WriteAllText(Path.Combine(dataDirectory, "startup-error.txt"), $"{DateTimeOffset.Now:O}\n{safeMessage}"); } catch { }
+            if (healthFile == null)
+                try { Directory.CreateDirectory(dataDirectory); File.WriteAllText(Path.Combine(dataDirectory, "startup-error.txt"), $"{DateTimeOffset.Now:O}\n{safeMessage}"); } catch { }
             if (!serverOnly && healthFile == null) MessageBox.Show(safeMessage, "Rika Translator 启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             Environment.ExitCode = 1;
         }

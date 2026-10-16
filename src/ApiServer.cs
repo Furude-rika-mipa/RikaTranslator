@@ -18,7 +18,14 @@ public static class ApiServer
         var verification = new GameVerificationService(GameTranslateToolkit.Updates.UpdatePackage.ApplicationDirectory);
         var unrealBridge = new UnrealFileBridge(store, translation, engines, runtime, logs);
         var galgame = new GalgameService(store, translation, runtime, logs);
+        var online = new OnlineUpdateService(store.DirectoryPath, updates, logs);
         app.Lifetime.ApplicationStopping.Register(galgame.Dispose);
+        app.Lifetime.ApplicationStopping.Register(online.Dispose);
+        app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
+        {
+            try { await updates.CleanupCompletedAsync(app.Lifetime.ApplicationStopping); }
+            catch (OperationCanceledException) { }
+        }));
         app.Lifetime.ApplicationStarted.Register(() => _ = unrealBridge.RunAsync(app.Lifetime.ApplicationStopping));
         app.Use(async (context, next) =>
         {
@@ -65,10 +72,15 @@ public static class ApiServer
         app.MapGet("/api/fonts", FontCatalog.Installed);
         app.MapGet("/api/updates/status", () => updates.Status());
         app.MapPost("/api/updates/pick", async () => new { path = await ToolkitWindow.PickUpdateAsync() });
-        app.MapPost("/api/updates/inspect", async (JsonElement body, CancellationToken ct) => await updates.InspectAsync(Required(body, "path"), ct));
+        app.MapPost("/api/updates/inspect", async (JsonElement body, CancellationToken ct) => await updates.InspectAsync(Required(body, "path"), ct, Boolean(body, "createBackup") == true));
+        app.MapGet("/api/updates/online/status", online.Status);
+        app.MapPost("/api/updates/online/check", async (CancellationToken ct) => await online.CheckAsync(ct));
+        app.MapPost("/api/updates/online/download", (JsonElement body) => online.StartDownload(Required(body, "id")));
+        app.MapPost("/api/updates/online/cancel", async (CancellationToken ct) => await online.CancelAsync(ct));
         app.MapPost("/api/updates/cancel", async (JsonElement body, CancellationToken ct) => { await updates.CancelAsync(Required(body, "id"), ct); return new { cancelled = true }; });
         async Task<IResult> ScheduleUpdate(JsonElement body, HttpContext context, bool restore)
         {
+            if (galgame.HasActiveSession) throw new InvalidOperationException("请先断开文本 Hook 并关闭正在翻译的游戏，再安装更新。");
             await updates.ScheduleAsync(Required(body, "id"), Boolean(body, "confirmed") == true, translation.Stats, restore, context.RequestAborted);
             context.Response.OnCompleted(() =>
             {

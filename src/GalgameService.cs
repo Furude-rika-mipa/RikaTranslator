@@ -32,6 +32,7 @@ public sealed class GalgameService(DataStore store, TranslationService translati
     private string? _overlayGame;
     private readonly string _nativeDir = Path.Combine(UpdatePackage.ApplicationDirectory, "adapters", "galgame", "native");
     public static bool Supported(GameRecord game) => game.Architecture is "x86" or "x64";
+    public bool HasActiveSession { get { lock (_gate) return _active != null; } }
     private bool ComponentsPresent => new[] { "LunaHost64.dll", "LunaHook32.dll", "LunaHook64.dll", "LunaSubprocess32.exe", "LunaSubprocess64.exe" }.All(f => File.Exists(Path.Combine(_nativeDir, f))) && File.Exists(WorkerPath);
     private string WorkerPath => Path.Combine(UpdatePackage.ApplicationDirectory, "adapters", "galgame", "RikaHookWorker.exe");
     private sealed class Session(GameRecord game, int pid, Process process)

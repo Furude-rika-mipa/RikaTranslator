@@ -11,6 +11,8 @@ public sealed class UpdatePlan
     public string CurrentVersion { get; set; } = "";
     public string TargetVersion { get; set; } = "";
     public string PackageHash { get; set; } = "";
+    // Older plans omitted this property and retain their recovery behavior.
+    public bool CreateBackup { get; set; } = true;
     public int ParentProcessId { get; set; }
     public long ParentStartTimeUtcTicks { get; set; }
     public string[] RestartArguments { get; set; } = [];
@@ -72,7 +74,7 @@ public sealed class UpdateInstaller
         UpdatePackage.RejectLinks(session);
         var journalPath = Path.Combine(session, "journal.json");
         if (File.Exists(journalPath)) throw new InvalidDataException("此更新任务已执行。请先恢复或重新选择更新包。");
-        var result = new UpdateResult { Id = plan.Id, FromVersion = plan.CurrentVersion, TargetVersion = plan.TargetVersion, BackupDirectory = Path.Combine(session, "backup") };
+        var result = new UpdateResult { Id = plan.Id, FromVersion = plan.CurrentVersion, TargetVersion = plan.TargetVersion, BackupDirectory = plan.CreateBackup ? Path.Combine(session, "backup") : "" };
         var journal = new UpdateJournal();
         bool applying = false;
         try
@@ -94,7 +96,7 @@ public sealed class UpdateInstaller
             }
             var payload = Path.Combine(session, "payload");
             await UpdatePackage.ExtractAsync(archive, manifest, payload, ct);
-            _progress?.Invoke("备份旧程序…");
+            _progress?.Invoke(plan.CreateBackup ? "备份旧程序…" : "检查待替换文件…");
             foreach (var file in manifest.Files.Concat(manifest.RemoveFiles))
             {
                 var target = Target(plan, file.Path);
@@ -102,11 +104,14 @@ public sealed class UpdateInstaller
                 var record = new UpdateBackup { Path = file.Path, NewHash = file.Sha256, Remove = manifest.RemoveFiles.Contains(file) };
                 if (File.Exists(target))
                 {
-                    var backup = UpdatePackage.Target(result.BackupDirectory, file.Path);
-                    Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
-                    File.Copy(target, backup, false);
-                    record.OriginalHash = UpdatePackage.Hash(backup);
-                    if (UpdatePackage.Hash(target) != record.OriginalHash) throw new IOException("备份期间程序文件发生变化。");
+                    record.OriginalHash = UpdatePackage.Hash(target);
+                    if (plan.CreateBackup)
+                    {
+                        var backup = UpdatePackage.Target(result.BackupDirectory, file.Path);
+                        Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+                        File.Copy(target, backup, false);
+                        if (UpdatePackage.Hash(backup) != record.OriginalHash || UpdatePackage.Hash(target) != record.OriginalHash) throw new IOException("备份期间程序文件发生变化。");
+                    }
                     if (record.Remove && record.OriginalHash != file.Sha256) throw new IOException("旧运行文件在备份前发生变化：" + file.Path);
                 }
                 journal.Files.Add(record);
@@ -137,12 +142,18 @@ public sealed class UpdateInstaller
                 }
             }
             journal.State = "complete"; UpdatePackage.WriteJson(journalPath, journal);
-            result.Status = "success"; result.Message = "本地更新已完成，新版启动检查通过。";
+            result.Status = "success"; result.Message = "程序更新已完成，新版启动检查通过。";
         }
         catch (Exception ex)
         {
             result.Message = "更新失败：" + ex.Message;
-            if (applying)
+            if (applying && !plan.CreateBackup)
+            {
+                journal.State = "repair-required"; result.Status = "repair-required";
+                result.Message += " 未创建旧程序备份，请重新解压完整程序包到原目录，保留 data 用户数据。";
+                UpdatePackage.WriteJson(journalPath, journal);
+            }
+            else if (applying)
             {
                 _progress?.Invoke("恢复旧程序…");
                 try { Restore(plan, journal, result.BackupDirectory); journal.State = "rolled-back"; result.Status = "rolled-back"; result.Message += " 已恢复旧程序。"; }
@@ -157,6 +168,7 @@ public sealed class UpdateInstaller
 
     public static UpdateResult RestorePending(UpdatePlan plan)
     {
+        if (!plan.CreateBackup) throw new InvalidDataException("此更新未创建旧程序备份，请使用完整程序包修复并保留 data。");
         var session = Session(plan);
         UpdatePackage.RejectLinks(session);
         var journal = JsonSerializer.Deserialize<UpdateJournal>(File.ReadAllText(Path.Combine(session, "journal.json")), UpdatePackage.Json) ?? throw new InvalidDataException("恢复记录无效。");
