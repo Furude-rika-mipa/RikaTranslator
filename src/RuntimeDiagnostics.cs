@@ -22,6 +22,7 @@ public sealed class GameRuntimeSnapshot
     public long Failed { get; set; }
     public long CacheHits { get; set; }
     public long PluginApplied { get; set; }
+    public long UiApplied { get; set; }
     public long PluginVerified { get; set; }
     public int VisibleWidgets { get; set; }
     public DateTimeOffset? LastSeen { get; set; }
@@ -135,14 +136,21 @@ public sealed class GameRuntimeDiagnostics(LogService logs)
     }
 
     public void ReportRpgStatus(string gameId, string session, long applied, string fontStatus)
+        => ReportBrowserStatus(gameId, session, applied, fontStatus, "0.2.0");
+
+    public void ReportNwStatus(string gameId, string session, long applied, string fontStatus, long uiApplied = 0)
+        => ReportBrowserStatus(gameId, session, applied, fontStatus, "0.7.6", uiApplied);
+
+    private void ReportBrowserStatus(string gameId, string session, long applied, string fontStatus, string version, long uiApplied = 0)
     {
         var activity = _activities.GetOrAdd(gameId, _ => new());
         lock (activity.Gate)
         {
-            if (activity.AdapterSession != session) { activity.AdapterSession = session; activity.PluginApplied = 0; }
+            if (activity.AdapterSession != session) { activity.AdapterSession = session; activity.PluginApplied = 0; activity.UiApplied = 0; }
             activity.PluginApplied = Math.Max(activity.PluginApplied, Math.Clamp(applied, 0, 1000000000));
+            activity.UiApplied = Math.Max(activity.UiApplied, Math.Clamp(uiApplied, 0, 1000000000));
             activity.FontStatus = fontStatus;
-            activity.AdapterVersion = "0.2.0";
+            activity.AdapterVersion = version;
             activity.StatusAt = DateTimeOffset.UtcNow;
         }
     }
@@ -187,8 +195,8 @@ public sealed class GameRuntimeDiagnostics(LogService logs)
                 GameRunning = running,
                 GlobalTranslationEnabled = globalTranslationEnabled,
                 GameTranslationEnabled = game.Enabled,
-                PauseReason = !globalTranslationEnabled ? activity.HookActive ? "全局翻译已暂停，启用后会继续处理当前 Hook 原文。" : "全局翻译已暂停。游戏仍可发送文字，但不会调用翻译服务。请启用全局翻译后重新启动游戏。"
-                    : !game.Enabled ? activity.HookActive ? "此游戏的翻译开关已关闭，启用后会继续处理当前 Hook 原文。" : "此游戏的翻译开关已关闭。请启用此游戏翻译后重新启动游戏。" : null,
+                PauseReason = !globalTranslationEnabled ? activity.HookActive || game.Engine == "NW.js" ? "全局翻译已暂停，启用后会继续处理当前原文。" : "全局翻译已暂停。游戏仍可发送文字，但不会调用翻译服务。请启用全局翻译后重新启动游戏。"
+                    : !game.Enabled ? activity.HookActive || game.Engine == "NW.js" ? "此游戏的翻译开关已关闭，启用后会继续处理当前原文。" : "此游戏的翻译开关已关闭。请启用此游戏翻译后重新启动游戏。" : null,
                 LoaderLogFound = activity.LoaderLogFound || activity.HookConnected,
                 TranslatorAttempted = activity.TranslatorAttempted || activity.HookConnected,
                 DeliveryMode = activity.HookActive ? activity.HookEmbedded ? "hook-embedded" : "floating" : "embedded",
@@ -208,13 +216,14 @@ public sealed class GameRuntimeDiagnostics(LogService logs)
             }
             if (snapshot.PauseReason == null) activity.LoggedPauseReason = null;
             if (game.Engine == "Unreal Engine" && running && snapshot.AdapterInstalled) ReadUnrealStatus(game, activity, snapshot);
-            if (game.Engine is "RPG Maker MV" or "RPG Maker MZ" && activity.StatusAt.HasValue)
+            if (game.Engine is "RPG Maker MV" or "RPG Maker MZ" or "NW.js" && activity.StatusAt.HasValue)
             {
-                snapshot.PluginApplied = activity.PluginApplied; snapshot.FontStatus = activity.FontStatus; snapshot.AdapterVersion = activity.AdapterVersion;
+                snapshot.PluginApplied = activity.PluginApplied; snapshot.UiApplied = activity.UiApplied; snapshot.FontStatus = activity.FontStatus; snapshot.AdapterVersion = activity.AdapterVersion;
                 snapshot.PluginHeartbeatAt = activity.StatusAt;
                 snapshot.PluginStatusCurrent = running && activity.StatusAt > DateTimeOffset.UtcNow.AddSeconds(-15);
                 if (snapshot.PluginStatusCurrent) snapshot.TranslatorAttempted = true;
                 snapshot.Notes.Add($"{(snapshot.PluginStatusCurrent ? "游戏插件" : "上次游戏插件状态")}报告已调用译文绘制 {activity.PluginApplied} 次；不代表像素显示或全部字形已验证。");
+                if (activity.UiApplied > 0) snapshot.Notes.Add($"插件报告已应用界面中文显示 {activity.UiApplied} 次；固定界面词条在本机完成。");
                 if (activity.FontStatus == "unavailable") snapshot.Notes.Add("上次游戏浏览器字体检查未通过，可能仍在加载或所选字体不可用。请结合状态时间检查字库文件与画面。");
             }
             snapshot.Stage = !snapshot.AdapterInstalled ? "not-installed"
@@ -468,7 +477,7 @@ public sealed class GameRuntimeDiagnostics(LogService logs)
         public readonly Dictionary<string, Cursor> Cursors = new(StringComparer.OrdinalIgnoreCase);
         public readonly List<InitialBoundary> InitialBoundaries = [];
         public DateTimeOffset? LaunchedAt, LastSeen, StatusAt;
-        public long Received, Translated, Delivered, Failed, CacheHits, PluginApplied;
+        public long Received, Translated, Delivered, Failed, CacheHits, PluginApplied, UiApplied;
         public string? AdapterSession, AdapterVersion, FontStatus;
         public bool LoaderLogFound, TranslatorAttempted, InteropWork, InteropPrepared, ChainloaderEntered, UnsafeLog, UnreadableLog, ReadLimit;
         public readonly HashSet<string> LoaderWarnings = new(StringComparer.Ordinal);
@@ -478,7 +487,7 @@ public sealed class GameRuntimeDiagnostics(LogService logs)
         public void Clear()
         {
             Cursors.Clear(); InitialBoundaries.Clear(); LaunchedAt = LastSeen = StatusAt = null;
-            Received = Translated = Delivered = Failed = CacheHits = PluginApplied = 0;
+            Received = Translated = Delivered = Failed = CacheHits = PluginApplied = UiApplied = 0;
             AdapterSession = AdapterVersion = FontStatus = null;
             LoaderLogFound = TranslatorAttempted = InteropWork = InteropPrepared = ChainloaderEntered = UnsafeLog = UnreadableLog = ReadLimit = false;
             LoaderWarnings.Clear();

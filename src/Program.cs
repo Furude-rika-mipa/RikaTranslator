@@ -56,7 +56,9 @@ internal static class Program
                     try
                     {
                         var detected = engines.Inspect(game.ExecutablePath);
-                        if (detected.Engine == game.Engine && detected.Backend == game.Backend || game.Engine is "Godot" or "Unknown" && EngineService.IsGalgameEngine(detected.Engine))
+                        if (detected.Engine == game.Engine && detected.Backend == game.Backend ||
+                            game.Engine is "Godot" or "Unknown" && EngineService.IsGalgameEngine(detected.Engine) ||
+                            game.Engine == "Unknown" && detected.Engine == "NW.js" && detected.Capability == "experimental-embedded")
                             store.UpdateAsync(d => {
                                 var current = d.Games.First(g => g.Id == game.Id);
                                 current.Engine = detected.Engine; current.Backend = detected.Backend;

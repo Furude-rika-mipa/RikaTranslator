@@ -1,7 +1,7 @@
 # Rika Translator（梨花翻译工具）
 
 Windows 游戏实时翻译工具，使用你自己的 OpenAI 兼容 API。
-当前随附版本：**0.7.4 / Windows 10、11 x64**。
+当前随附版本：**0.7.6 / Windows 10、11 x64**。
 
 ## 功能
 
@@ -10,24 +10,25 @@ Windows 游戏实时翻译工具，使用你自己的 OpenAI 兼容 API。
 - 提供翻译队列、缓存、人工译文、词表、游戏上下文和日志。
 - Galgame 文本 Hook、透明翻译浮窗、独立字体和字号；可回填通道支持游戏内嵌。
 - Unity、Ren’Py、RPG Maker 和匹配 Unreal 路线的字体设置及适配。
+- Flower Knight Girl Viewer 逐句对白翻译，以及不额外调用 API 的本地中文菜单、搜索和设置。
 - 专用本地更新包的校验、安装、备份与失败回滚。
 
 本项目不提供 OCR。引擎识别不代表所有游戏或控件均可翻译，具体能力见[使用说明](docs/使用说明.md)。
 
 ## 获取和运行
 
-从 [Releases](https://github.com/Fudude-Rika/RikaTranslator/releases/latest) 下载完整程序包：
-[RikaTranslator-0.7.4-win-x64.zip](https://github.com/Fudude-Rika/RikaTranslator/releases/download/v0.7.4/RikaTranslator-0.7.4-win-x64.zip)。
-解压后进入 `RikaTranslator-0.7.4-win-x64`，保留全部运行文件，双击 `RikaTranslator.exe`。
-同页提供 `SHA256SUMS.txt`，用于校验下载的程序包。
+从 [Releases](https://github.com/Furude-rika-mipa/RikaTranslator/releases/latest) 下载完整程序包：
+[RikaTranslator-0.7.6-win-x64.zip](https://github.com/Furude-rika-mipa/RikaTranslator/releases/download/v0.7.6/RikaTranslator-0.7.6-win-x64.zip)。
+完整解压后进入 `RikaTranslator-0.7.6-win-x64`，双击 `RikaTranslator.exe`。
+同页附带 `SHA256SUMS.txt`，可校验下载的完整程序包。
 
-仓库中也保留同版本的[完整成品目录](releases/RikaTranslator-0.7.4-win-x64)。
-普通用户无需编译源码，不需要安装 .NET SDK、Python 或 Node.js。
+仓库中也提供同版本的[完整成品目录](releases/RikaTranslator-0.7.6-win-x64)。
+普通用户无需编译，也无需安装 .NET SDK、Python 或 Node.js。
 
 需要 Microsoft Edge WebView2 Runtime；缺少时从[微软官方页面](https://developer.microsoft.com/microsoft-edge/webview2/)安装。
 首次运行会创建自己的 `data`。分发文件没有预置个人 API Key、服务配置或游戏库。
 
-更新内容见 [0.7.4 更新说明](docs/更新说明-0.7.4.md)。
+更新内容见 [0.7.6 更新说明](docs/更新说明-0.7.6.md)。
 升级后已经注入旧版 LunaHook 的游戏需完全退出一次。
 BGI 等缓存字形的游戏修改字体或内嵌比例后，也需要保存进度并完全重启。
 
@@ -38,10 +39,10 @@ BGI 等缓存字形的游戏修改字体或内嵌比例后，也需要保存进�
 docs/                           使用说明、更新说明与构建说明
 src/                            主程序、更新器、Hook Worker 和构建工具源码
 releases/
-  RikaTranslator-0.7.4-win-x64/   完整 Windows x64 成品
+  RikaTranslator-0.7.6-win-x64/   完整 Windows x64 成品
 LICENSE                         主项目 GPL-3.0 许可证
 THIRD-PARTY.md                   第三方组件来源与许可
-SHA256SUMS.txt                   待发布文件的 SHA-256 清单
+SHA256SUMS.txt                   公开仓库文件的 SHA-256 清单
 ```
 
 ## 构建
@@ -50,7 +51,7 @@ SHA256SUMS.txt                   待发布文件的 SHA-256 清单
 以下命令从仓库根目录执行，输出到新的空目录：
 
 ```powershell
-.\src\build.ps1 -Version '0.7.4' -LooseHookSource -OutputDirectory '.\out\RikaTranslator-0.7.4-win-x64'
+.\src\build.ps1 -Version '0.7.6' -LooseHookSource -OutputDirectory '.\out\RikaTranslator-0.7.6-win-x64'
 ```
 
 `-LooseHookSource` 将 Hook Worker 对应源码作为目录提供。

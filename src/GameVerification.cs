@@ -60,6 +60,12 @@ public sealed class GameVerificationService
             paths.Add(Path.Combine(root, "data", "System.json"));
             paths.Add(Path.Combine(root, "js", game.Engine == "RPG Maker MZ" ? "rmmz_core.js" : "rpg_core.js"));
         }
+        else if (game.Engine == "NW.js")
+        {
+            paths.Add(Path.Combine(game.Directory, "package.nw", "package.json"));
+            paths.Add(Path.Combine(game.Directory, "package.nw", "data", "scripts", "scene.js"));
+            paths.Add(Path.Combine(game.Directory, "package.nw", "data.json"));
+        }
         var combined = string.Join("/", paths.Select(FileHash));
         return Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(combined))).ToLowerInvariant();
     }

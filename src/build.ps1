@@ -1,6 +1,6 @@
 param(
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot 'dist\RikaTranslator-0.7.4-win-x64'),
-    [string]$Version = '0.7.4',
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot 'dist\RikaTranslator-0.7.6-win-x64'),
+    [string]$Version = '0.7.6',
     [switch]$NoRestore,
     [switch]$FlatLayout,
     [switch]$LooseHookSource

@@ -372,14 +372,18 @@ public static class ApiServer
         app.MapPost("/bridge/status", (JsonElement body, HttpContext context) =>
         {
             var game = VerifyBridge(Required(body, "gameId"), Required(body, "token"), context);
-            if (game.Engine is not ("RPG Maker MV" or "RPG Maker MZ")) throw new ArgumentException("此状态入口用于 RPG Maker 插件。");
+            if (game.Engine is not ("RPG Maker MV" or "RPG Maker MZ" or "NW.js")) throw new ArgumentException("此状态入口用于网页游戏插件。");
             var session = Required(body, "session");
             if (!Regex.IsMatch(session, "^[a-zA-Z0-9-]{1,64}$")) throw new ArgumentException("运行状态会话无效。");
             var fontStatus = Required(body, "fontStatus");
             if (fontStatus is not ("loaded" or "unavailable" or "original" or "unknown")) throw new ArgumentException("字体状态无效。");
             var applied = body.TryGetProperty("applied", out var value) && value.TryGetInt64(out var n) ? n : 0;
-            runtime.ReportRpgStatus(game.Id, session, applied, fontStatus);
-            return Results.Ok(new { received = true });
+            var uiApplied = body.TryGetProperty("uiApplied", out var uiValue) && uiValue.TryGetInt64(out var uiCount) ? uiCount : 0;
+            if (game.Engine == "NW.js") runtime.ReportNwStatus(game.Id, session, applied, fontStatus, uiApplied);
+            else runtime.ReportRpgStatus(game.Id, session, applied, fontStatus);
+            var settings = store.Snapshot().Settings;
+            return Results.Ok(new { received = true, enabled = game.Enabled && settings.Enabled,
+                targetLanguage = string.IsNullOrEmpty(game.TargetLanguage) ? settings.TargetLanguage : game.TargetLanguage });
         });
         app.MapFallbackToFile("index.html");
 

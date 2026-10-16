@@ -77,6 +77,7 @@ public sealed partial class EngineService
                 result.Warnings.Add("适配普通对话、选择项与标准文本窗口；图片文字、加密/打包的脚本、完全改写文本窗口的插件需单独验证。");
                 break;
             }
+            if (DetectNwjs(result, root)) break;
             if (System.IO.Directory.Exists(Path.Combine(root, "renpy")) && System.IO.Directory.Exists(Path.Combine(root, "game")))
             {
                 result.Directory = root; result.Engine = "Ren'Py"; result.Backend = "Python";
@@ -377,7 +378,13 @@ public sealed partial class EngineService
             if (System.IO.Directory.Exists(target)) throw new InvalidOperationException($"目标文件位置已有同名目录：{relative}");
             result.Add(new PayloadFile(relative, bytes));
         }
-        if (game.Engine is "RPG Maker MV" or "RPG Maker MZ")
+        if (game.Engine == "NW.js")
+        {
+            var entry = NwViewerEntry(root) ?? throw new InvalidOperationException("此 NW.js 程序没有匹配已验证的 Viewer 布局，未安装。");
+            Add(NwViewerAdapter, NwViewerScript(game, bridge, token));
+            Add(entry, NwViewerHtml(ReadFileBounded(SafeTarget(root, entry), 1024 * 1024)), true);
+        }
+        else if (game.Engine is "RPG Maker MV" or "RPG Maker MZ")
         {
             var rpg = RpgRoot(root) ?? throw new InvalidOperationException("未找到可读写的 RPG Maker 插件目录。");
             var prefix = Path.GetRelativePath(root, rpg); if (prefix == ".") prefix = ""; else prefix += "/";
@@ -554,7 +561,7 @@ public sealed partial class EngineService
         return string.Join("\r\n", lines).TrimEnd() + "\r\n";
     }
     private static string IniValue(string value) => Regex.IsMatch(value, "^[A-Za-z0-9_-]{1,32}$") ? value : throw new InvalidOperationException("语言代码只能包含字母、数字、下划线和短横线。");
-    private static string AdapterName(GameRecord game) => game.Engine switch { "Ren'Py" => "renpy-text-filter", "RPG Maker MV" or "RPG Maker MZ" => "rpg-maker-runtime", "Unity" when game.Backend == "Mono" => "xunity-mono", "Unity" when game.Backend == "IL2CPP" => "xunity-il2cpp", "Unreal Engine" => "ue4ss-runtime", _ => "unavailable" };
+    private static string AdapterName(GameRecord game) => game.Engine switch { "NW.js" => "nwjs-viewer-runtime", "Ren'Py" => "renpy-text-filter", "RPG Maker MV" or "RPG Maker MZ" => "rpg-maker-runtime", "Unity" when game.Backend == "Mono" => "xunity-mono", "Unity" when game.Backend == "IL2CPP" => "xunity-il2cpp", "Unreal Engine" => "ue4ss-runtime", _ => "unavailable" };
 
     private static void ArchiveUnrealGenerated(string directory, InstallationManifest manifest, GameRecord game)
     {
