@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 namespace GameTranslateToolkit;
 
 /// <summary>One translation pipeline for game adapters, the editor and connection tests.</summary>
-public sealed class TranslationService
+public sealed partial class TranslationService
 {
     private readonly DataStore _store;
     private readonly LogService _logs;
@@ -23,6 +23,8 @@ public sealed class TranslationService
     private TaskCompletionSource _gateChanged = NewSignal();
     private int _active;
     private int _waiting;
+    private int _foregroundWaiting;
+    private int _backgroundActive;
     private readonly TranslationStats _stats = new();
     private const int MaxTextLength = 100_000;
     private const int MaxResponseLength = 2_000_000;
@@ -174,17 +176,21 @@ public sealed class TranslationService
         }
     }
 
-    private async Task<TranslationResult> TranslateCoreAsync(TranslateInput input, bool useCache, bool persist, bool test, CancellationToken ct)
+    private RequestContext? PrepareRequest(TranslateInput input, bool useCache, bool persist, bool test,
+        out TranslationResult? cached, AppData? snapshot = null, bool count = true)
     {
-        ct.ThrowIfCancellationRequested();
-        ChangeStats(s => s.Received++);
+        cached = null;
+        if (count) ChangeStats(s => s.Received++);
         var text = input.Text ?? "";
         if (text.Length > MaxTextLength)
             throw new InvalidOperationException("单次翻译文本过长，请拆分后再试。");
         if (string.IsNullOrWhiteSpace(text))
-            return new TranslationResult { Text = text, Cached = false, RequestId = Guid.NewGuid().ToString("N"), ElapsedMs = 0 };
+        {
+            cached = new TranslationResult { Text = text, Cached = false, RequestId = Guid.NewGuid().ToString("N"), ElapsedMs = 0 };
+            return null;
+        }
 
-        var data = _store.Snapshot();
+        var data = snapshot ?? _store.Snapshot();
         var gameId = string.IsNullOrWhiteSpace(input.GameId) ? null : input.GameId;
         var game = gameId is null ? null : data.Games.FirstOrDefault(g => g.Id == gameId)
             ?? throw new InvalidOperationException("找不到当前游戏，请重新选择。");
@@ -197,7 +203,7 @@ public sealed class TranslationService
             var manual = data.Translations.Where(t => t.Manual && SameGame(t.GameId, gameId) && t.Source == text
                 && SameLanguage(t.From, from) && SameLanguage(t.To, to)).OrderByDescending(t => t.UpdatedAt).FirstOrDefault();
             if (manual is not null)
-                return CachedResult(manual.Translation, gameId, "使用人工修订译文");
+            { cached = CachedResult(manual.Translation, gameId, "使用人工修订译文"); return null; }
         }
 
         var providerId = First(input.ProviderId, game?.ProviderId, data.Settings.ProviderId);
@@ -222,16 +228,23 @@ public sealed class TranslationService
         }));
         if (useCache && !input.Force)
         {
-            var cached = data.Translations.Where(t => !t.Manual && t.CacheKey == cacheKey)
+            var entry = data.Translations.Where(t => !t.Manual && t.CacheKey == cacheKey)
                 .OrderByDescending(t => t.UpdatedAt).FirstOrDefault();
-            if (cached is not null)
-                return CachedResult(cached.Translation, gameId, "翻译缓存命中");
+            if (entry is not null)
+            { cached = CachedResult(entry.Translation, gameId, "翻译缓存命中"); return null; }
         }
 
-        var context = new RequestContext(input, gameId, from, to, provider, endpoint, data.Settings.Prompt ?? "",
+        return new RequestContext(input, gameId, from, to, provider, endpoint, data.Settings.Prompt ?? "",
             game?.Context ?? "", glossary, cacheKey, persist, test);
+    }
+
+    private async Task<TranslationResult> TranslateCoreAsync(TranslateInput input, bool useCache, bool persist, bool test, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var context = PrepareRequest(input, useCache, persist, test, out var cached);
+        if (context == null) return cached!;
         // Connection tests are independent requests and can never succeed from cached game text.
-        var flightKey = test ? Guid.NewGuid().ToString("N") : cacheKey;
+        var flightKey = test ? Guid.NewGuid().ToString("N") : context.CacheKey;
         Flight flight;
         lock (_flightLock)
         {
@@ -242,8 +255,21 @@ public sealed class TranslationService
                 var captured = flight;
                 flight.Task = Task.Run(() => ExecuteAsync(context, captured.Cancellation.Token));
             }
+            if (!test) flight.Promote?.Invoke();
             flight.Waiters++;
         }
+        try { return await AwaitFlightAsync(flightKey, flight, ct); }
+        catch (Exception) when (flight.Speculative && !ct.IsCancellationRequested)
+        {
+            // A rejected speculative batch must never prevent the actual current line from translating.
+            lock (_flightLock)
+                if (_flights.TryGetValue(flightKey, out var previous) && ReferenceEquals(previous, flight)) _flights.Remove(flightKey);
+            return await TranslateCoreAsync(input, useCache, persist, test, ct);
+        }
+    }
+
+    private async Task<TranslationResult> AwaitFlightAsync(string flightKey, Flight flight, CancellationToken ct)
+    {
         try
         {
             return await flight.Task.WaitAsync(ct);
@@ -273,7 +299,7 @@ public sealed class TranslationService
         return new TranslationResult { Text = text, Cached = true, RequestId = id, ElapsedMs = 0 };
     }
 
-    private async Task<TranslationResult> ExecuteAsync(RequestContext context, CancellationToken ct)
+    private async Task<TranslationResult> ExecuteAsync(RequestContext context, CancellationToken ct, bool background = false, Func<bool>? demanded = null)
     {
         var requestId = Guid.NewGuid().ToString("N");
         var watch = Stopwatch.StartNew();
@@ -282,7 +308,7 @@ public sealed class TranslationService
         {
             _logs.Write("Debug", "translation", "翻译请求进入队列", context.GameId, requestId,
                 new { providerId = context.Provider.Id, characters = context.Input.Text.Length, test = context.Test });
-            await AcquireAsync(ct);
+            await AcquireAsync(ct, background, demanded);
             acquired = true;
             if (!context.Test)
             {
@@ -349,16 +375,17 @@ public sealed class TranslationService
         }
         finally
         {
-            if (acquired) Release();
+            if (acquired) Release(background);
         }
     }
 
-    private async Task AcquireAsync(CancellationToken ct)
+    private async Task AcquireAsync(CancellationToken ct, bool background = false, Func<bool>? demanded = null)
     {
         lock (_gateLock)
         {
             if (_waiting >= MaxPending) throw new InvalidOperationException("翻译队列已满，请降低取词频率或稍后重试。");
             _waiting++;
+            if (!background) _foregroundWaiting++;
         }
         ChangeStats(s => s.Queued++);
         try
@@ -370,9 +397,12 @@ public sealed class TranslationService
                 Task changed;
                 lock (_gateLock)
                 {
-                    if (_active < limit)
+                    // A queued current line runs before speculative work; reserve a slot when possible.
+                    if (_active < limit && (!background || demanded?.Invoke() == true ||
+                        _foregroundWaiting == 0 && _backgroundActive == 0 && _active < Math.Max(1, limit - 1)))
                     {
                         _active++;
+                        if (background) _backgroundActive++;
                         ChangeStats(s => s.InFlight++);
                         return;
                     }
@@ -383,16 +413,17 @@ public sealed class TranslationService
         }
         finally
         {
-            lock (_gateLock) _waiting--;
+            lock (_gateLock) { _waiting--; if (!background) _foregroundWaiting--; }
             ChangeStats(s => s.Queued--);
         }
     }
 
-    private void Release()
+    private void Release(bool background = false)
     {
         lock (_gateLock)
         {
             _active--;
+            if (background) _backgroundActive--;
             var signal = _gateChanged;
             _gateChanged = NewSignal();
             signal.TrySetResult();
@@ -704,6 +735,8 @@ public sealed class TranslationService
         public CancellationTokenSource Cancellation { get; } = new();
         public Task<TranslationResult> Task { get; set; } = null!;
         public int Waiters { get; set; }
+        public bool Speculative { get; set; }
+        public Action? Promote { get; set; }
     }
     private sealed record RequestContext(TranslateInput Input, string? GameId, string From, string To, ProviderRecord Provider,
         Uri Endpoint, string Prompt, string Context, List<GlossaryEntry> Glossary, string CacheKey, bool Persist, bool Test);

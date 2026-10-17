@@ -135,6 +135,7 @@ public static class ApiServer
             settings.Prompt = Text(body, "prompt") ?? settings.Prompt;
             settings.Concurrency = Math.Clamp(Integer(body, "concurrency") ?? settings.Concurrency, 1, 16);
             settings.Enabled = Boolean(body, "enabled") ?? settings.Enabled;
+            settings.PrefetchEnabled = Boolean(body, "prefetchEnabled") ?? settings.PrefetchEnabled;
             var theme = Text(body, "theme"); if (theme is "dark" or "light" or "system") settings.Theme = theme;
             var accent = Text(body, "accent"); if (accent != null && Regex.IsMatch(accent, "^#[0-9a-fA-F]{6}$")) settings.Accent = accent;
             settings.Zoom = Math.Clamp(Integer(body, "zoom") ?? settings.Zoom, 75, 150);
@@ -373,6 +374,16 @@ public static class ApiServer
             var game = VerifyBridge(gameId, Required(body, "token"), context);
             return await BridgeTranslate(game, Required(body, "text"), context, ct);
         });
+        app.MapPost("/bridge/prefetch", async (JsonElement body, HttpContext context, CancellationToken ct) =>
+        {
+            var game = VerifyBridge(Required(body, "gameId"), Required(body, "token"), context);
+            if (!body.TryGetProperty("texts", out var texts) || texts.ValueKind != JsonValueKind.Array || texts.GetArrayLength() is < 1 or > TranslationService.PrefetchLines)
+                throw new ArgumentException("预读每次最多 3 句。");
+            var sources = texts.EnumerateArray().Select(t => t.ValueKind == JsonValueKind.String ? t.GetString()! : throw new ArgumentException("预读文本格式无效。")).ToArray();
+            var configuration = Required(body, "configuration");
+            var items = await translation.PrefetchAsync(game.Id, configuration, sources, ct);
+            return Results.Ok(new { configuration = translation.ConfigurationStamp(game.Id), items });
+        });
         app.MapGet("/bridge/translate/{gameId}/{token}", async (string gameId, string token, HttpRequest r, CancellationToken ct) =>
         {
             var game = VerifyBridge(gameId, token, r.HttpContext); var result = await BridgeTranslate(game, r.Query["text"].ToString(), r.HttpContext, ct); return Results.Text(result.Text, "text/plain", Encoding.UTF8);
@@ -395,6 +406,8 @@ public static class ApiServer
             else runtime.ReportRpgStatus(game.Id, session, applied, fontStatus);
             var settings = store.Snapshot().Settings;
             return Results.Ok(new { received = true, enabled = game.Enabled && settings.Enabled,
+                prefetchEnabled = game.Enabled && settings.Enabled && settings.PrefetchEnabled && TranslationService.SupportsPrefetch(game),
+                configuration = translation.ConfigurationStamp(game.Id),
                 targetLanguage = string.IsNullOrEmpty(game.TargetLanguage) ? settings.TargetLanguage : game.TargetLanguage });
         });
         app.MapFallbackToFile("index.html");
@@ -413,12 +426,15 @@ public static class ApiServer
         async Task<TranslationResult> BridgeTranslate(GameRecord game, string text, HttpContext context, CancellationToken ct)
         {
             var settings = store.Snapshot().Settings;
+            var configuration = translation.ConfigurationStamp(game.Id);
             runtime.Receive(game.Id, text.Length);
             try
             {
                 if (!game.Enabled) throw new InvalidOperationException("该游戏翻译已暂停。");
                 if (!settings.Enabled) throw new InvalidOperationException("翻译已暂停。");
                 var result = await translation.TranslateAsync(new TranslateInput { GameId = game.Id, Text = text, From = string.IsNullOrEmpty(game.SourceLanguage) ? settings.SourceLanguage : game.SourceLanguage, To = string.IsNullOrEmpty(game.TargetLanguage) ? settings.TargetLanguage : game.TargetLanguage }, ct);
+                if (translation.ConfigurationStamp(game.Id) != configuration) throw new InvalidOperationException("翻译设置已改变，请重试当前句。");
+                result.Configuration = configuration;
                 runtime.Obtained(game.Id, result);
                 context.Response.OnCompleted(() => { if (!context.RequestAborted.IsCancellationRequested && context.Response.StatusCode < 400) runtime.Complete(game.Id, result, true); return Task.CompletedTask; });
                 return result;

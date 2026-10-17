@@ -5,7 +5,7 @@
     <OutputType>WinExe</OutputType>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.7.7</Version>
+    <Version>0.7.8</Version>
     <AssemblyName>RikaTranslator</AssemblyName>
     <RootNamespace>GameTranslateToolkit</RootNamespace>
     <Title>Rika Translator</Title>

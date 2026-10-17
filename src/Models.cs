@@ -19,6 +19,7 @@ public class AppSettings
     public string Prompt { get; set; } = "你是一位专业游戏文本译者，将原文从 {from} 翻译为 {to}。只输出译文，不解释、不添加引号。忠实于原意与角色语气，严格保留占位符、变量、控制符、格式标签和换行。";
     public int Concurrency { get; set; } = 2;
     public bool Enabled { get; set; } = true;
+    public bool PrefetchEnabled { get; set; } = true;
     public string Theme { get; set; } = "system";
     public string Accent { get; set; } = "#3b82f6";
     public int Zoom { get; set; } = 100;
@@ -148,6 +149,7 @@ public class TranslationResult
     public string RequestId { get; set; } = "";
     public long ElapsedMs { get; set; }
     public long? Tokens { get; set; }
+    public string? Configuration { get; set; }
 }
 public class TranslationStats
 {

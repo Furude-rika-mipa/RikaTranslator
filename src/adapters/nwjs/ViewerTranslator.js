@@ -14,6 +14,7 @@
     var lastMarkup = null, lastContext = null, revision = 0, timer = null;
     var enabled = false, applied = 0, heartbeatBusy = false, lastWarning = -60000;
     var cache = new Map(), pending = new Map(), retryAt = new Map();
+    var prefetchEnabled = false, configuration = "", cacheRevision = 0, prefetchJob = null, prefetchRetry = 0;
     var session = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
     var controls = /(?:\\[A-Za-z]+(?:\[[^\]\r\n]*\])?|%\d*\$?[sdiuf]|\{[^{}\r\n]*\})/g;
 
@@ -44,9 +45,10 @@
         return typeof translated === "string" && translated.trim().length > 0 && translated.length <= 32768 &&
             JSON.stringify(source.match(controls) || []) === JSON.stringify(translated.match(controls) || []);
     }
-    function post(url, body) {
+    function post(url, body, job) {
         return new Promise(function (resolve, reject) {
             var xhr = new XMLHttpRequest(), done = false;
+            if (job) job.xhr = xhr;
             function fail() { if (!done) { done = true; reject(new Error("Local translation unavailable")); } }
             xhr.open("POST", url, true);
             xhr.timeout = 65000;
@@ -69,10 +71,13 @@
         if (cache.has(text)) return Promise.resolve(cache.get(text));
         if (pending.has(text)) return pending.get(text);
         if (pending.size >= 2 || (retryAt.get(text) || 0) > Date.now()) return null;
+        var epoch = cacheRevision;
         var task = post(config.endpoint, { gameId: config.gameId, token: config.token, text: text }).then(function (result) {
+            if (epoch !== cacheRevision || (result.configuration && configuration && result.configuration !== configuration)) return null;
             if (!safe(text, result.text)) throw new Error("Invalid translation");
             remember(text, result.text); retryAt.delete(text); return result.text;
         }).catch(function () {
+            if (epoch !== cacheRevision) return null;
             retryAt.set(text, Date.now() + 5000);
             while (retryAt.size > 256) retryAt.delete(retryAt.keys().next().value);
             if (Date.now() - lastWarning > 60000) {
@@ -80,15 +85,81 @@
                 console.warn("[Rika Translator] 暂时未取得译文，继续显示原文。请查看工具运行日志。");
             }
             return null;
-        }).then(function (value) { pending.delete(text); return value; });
+        }).then(function (value) { if (pending.get(text) === task) pending.delete(text); return value; });
         pending.set(text, task);
         return task;
+    }
+    function sceneKey() {
+        var s = window.scene || {}, story = s.story || {};
+        return JSON.stringify([s.id, s.type, story.id, story.section, story.part]);
+    }
+    function cancelPrefetch() {
+        var job = prefetchJob; prefetchJob = null;
+        if (job && job.xhr) job.xhr.abort();
+    }
+    function futureText(raw) {
+        var text = raw.replace(/\\n/g, "<br />"), s = window.scene;
+        // Match addRPGXText's optional ruby handling without running any game command.
+        if (!s.translated && window.prefs && prefs.scene && prefs.scene.furigana && typeof furigana !== "undefined" && text.includes("（")) {
+            var reading = (text.split("（")[1] || "").split("）")[0], word = furigana.get(reading);
+            if (word !== undefined) text = text.replace("（" + reading + "）", "");
+        }
+        var fragment = document.createElement("template");
+        fragment.innerHTML = text;
+        return plainText(fragment.content);
+    }
+    function lookahead() {
+        var s = window.scene;
+        if (!s || !s.paused || s.choice || !Array.isArray(s.script) || !Number.isInteger(s.index) || s.index < 0 ||
+            !((typeof H_RPGX !== "undefined" && s.type === H_RPGX) || (typeof STORY_RPGX !== "undefined" && s.type === STORY_RPGX))) return [];
+        var lines = [], candidate = null, characters = 0;
+        var visual = /^(?:GROUP|\/GROUP|NAME_PLATE|VOICE_PLAY|SPINE|SPINE_PLAY|SPINE_EFFECT|SPINE_WAIT|SPINE_IMAGE|ACTOR|ACTOR_FRONT|ACTOR_OUT|ACTOR_PRIORITY|VIDEO_PLAY|VIDEO_STOP|BG|BG_OUT|BGM_PLAY|BGM_STOP|EFFECT_FLASH|EFFECT_QUAKE|EV|EV_OUT|FADE|FADE_IN|FADE_IN2|FADE_OUT|FADE_OUT2|SE_PLAY|SE_STOP|TRANSITION|TXT_CLEAR|UI_DISP|WAIT|WAIT2)$/;
+        for (var i = s.index; i < Math.min(s.script.length, s.index + 128) && lines.length < 3; i++) {
+            var command = s.script[i];
+            if (typeof command !== "string" || command.length > 16384) break;
+            var match = command.match(/^<([^=]*?)>(.*)/);
+            if (!match) { candidate = futureText(command); continue; }
+            var tag = match[1];
+            if (tag === "PAUSE") {
+                if (candidate && usable(candidate) && candidate.length <= 4096) {
+                    if (characters + candidate.length > 8192) break;
+                    if (lines.indexOf(candidate) < 0) { lines.push(candidate); characters += candidate.length; }
+                }
+                candidate = null;
+            } else if (tag === "TXT_CLEAR") candidate = null;
+            else if (!visual.test(tag)) break; // Includes choices, jumps, labels, endings and unknown commands.
+        }
+        return lines;
+    }
+    function maintainPrefetch() {
+        if (!prefetchJob) return;
+        var s = window.scene, text = box ? plainText(box) : "";
+        if (!enabled || !prefetchEnabled || !s || s.choice || s.script !== prefetchJob.script || sceneKey() !== prefetchJob.scene ||
+            (text !== prefetchJob.current && prefetchJob.sources.indexOf(text) < 0)) cancelPrefetch();
+    }
+    function prefetch(source) {
+        if (!prefetchEnabled || !configuration || prefetchJob || Date.now() < prefetchRetry) return;
+        var all = lookahead(), sources = all.filter(function (text) { return text !== source && !cache.has(text) && !pending.has(text); });
+        if (!sources.length || sources.length < 2 && all.length > 1) return;
+        var job = { script: window.scene.script, scene: sceneKey(), current: source, sources: sources, epoch: cacheRevision };
+        prefetchJob = job;
+        post(config.endpoint.replace(/translate$/, "prefetch"), { gameId: config.gameId, token: config.token,
+            configuration: configuration, texts: sources }, job).then(function (result) {
+            if (prefetchJob !== job || job.epoch !== cacheRevision || result.configuration !== configuration || !Array.isArray(result.items)) return;
+            if (result.items.length !== sources.length || !result.items.every(function (item, index) {
+                return item.source === sources[index] && safe(item.source, item.text);
+            })) { prefetchRetry = Date.now() + 10000; return; }
+            result.items.forEach(function (item) { remember(item.source, item.text); });
+        }).catch(function () { if (prefetchJob === job) prefetchRetry = Date.now() + 10000; }).then(function () {
+            if (prefetchJob === job) prefetchJob = null;
+        });
     }
     function schedule(delay) {
         clearTimeout(timer);
         timer = setTimeout(translateCurrent, delay == null ? 180 : delay);
     }
     function changed() {
+        maintainPrefetch();
         var node = currentBox();
         if (node !== box) {
             hideTranslation();
@@ -145,6 +216,7 @@
             if (!translated) { schedule(5000); return; }
             if (translated !== source) showTranslation(node, translated);
             else hideTranslation();
+            prefetch(source);
         });
     }
     function heartbeat() {
@@ -155,7 +227,14 @@
             uiApplied: ui ? ui.getState().applied : 0
         }).then(function (result) {
             var previous = enabled;
+            if (result.configuration && result.configuration !== configuration) {
+                if (configuration) { cache.clear(); pending.clear(); retryAt.clear(); cacheRevision++; revision++; hideTranslation(); schedule(0); }
+                configuration = result.configuration;
+                cancelPrefetch(); prefetchRetry = 0;
+            }
+            prefetchEnabled = result.prefetchEnabled === true;
             enabled = result.enabled === true;
+            if (!prefetchEnabled || !enabled) cancelPrefetch();
             if (ui) ui.setEnabled(enabled && /^zh(?:-|$)/i.test(result.targetLanguage || config.uiLanguage || "zh-CN"));
             if (previous !== enabled) {
                 revision++; hideTranslation();
@@ -163,12 +242,14 @@
             }
         }).catch(function () {
             if (enabled) { enabled = false; revision++; hideTranslation(); }
+            prefetchEnabled = false; cancelPrefetch();
             if (ui) ui.setEnabled(false);
         }).then(function () { heartbeatBusy = false; });
     }
     window.RikaNwAdapter = {
-        version: "0.7.6",
-        getState: function () { return { enabled: enabled, applied: applied, cacheSize: cache.size, pending: pending.size, bound: !!box, ui: ui ? ui.getState() : null }; }
+        version: "0.7.8",
+        getState: function () { return { enabled: enabled, applied: applied, cacheSize: cache.size, pending: pending.size, bound: !!box,
+            prefetchEnabled: prefetchEnabled, prefetching: !!prefetchJob, ui: ui ? ui.getState() : null }; }
     };
     window.addEventListener("resize", function () { setTimeout(layoutTranslation, 0); });
     changed(); heartbeat();
