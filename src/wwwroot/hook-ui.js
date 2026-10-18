@@ -104,6 +104,12 @@ async function showHookSettings(id) {
   });};
 }
 async function hookAction(action,id,button) {
+  if(action==='hook-stop-all'){
+    const result=await api('/api/hooks/stop-all',{method:'POST'});
+    for(const key of Object.keys(hookSnapshots))hookSnapshots[key]={...hookSnapshots[key],active:false,connected:false,embedding:false,overlayShown:false,stage:'stopped',displayStatus:'Hook 已断开'};
+    toast(result.stopped?'所有 Hook 连接已断开，游戏继续运行':'当前没有正在连接的 Hook','info');
+    return;
+  }
   if(action==='hook-retry'){await api(hookUrl(id)+'/retry',{method:'POST'});await refreshHook(id);toast('已重新翻译最近原文；内嵌从下一句起生效');return;}
   if(action==='hook-remove-code'){await api(hookUrl(id)+'/remove-code',{method:'POST',body:{code:button.dataset.code}});closeModal(true);toast('已取消保存，下次连接不再插入；当前钩子需重启游戏清除');return;}
   if(action==='hook-refresh'){await refreshHook(id,true);return;}

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace GameTranslateToolkit.Updates;
@@ -111,11 +112,83 @@ public sealed class LocalUpdateService
         try { if (Scheduled) throw new InvalidOperationException("更新已经开始。"); if (_pending?.Id == id) DiscardPending(); }
         finally { _gate.Release(); }
     }
+
+    internal async Task<string> SavePendingAsync(string id, CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (Scheduled || _pending?.Id != id || _pending.CreateBackup)
+                throw new InvalidOperationException("待安装的在线更新已失效。");
+            UpdatePackage.WriteJson(Path.Combine(UpdateInstaller.Session(_pending), "plan.json"), _pending);
+            return _pending.PackageHash;
+        }
+        finally { _gate.Release(); }
+    }
+
+    internal async Task<UpdatePreview> RestorePendingAsync(string id, string expectedHash, CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (Scheduled || _pending != null && _pending.Id != id)
+                throw new InvalidOperationException("已有其他更新任务，请重新检查更新。");
+            var plan = ReadPlan(id);
+            var session = UpdateInstaller.Session(plan);
+            var package = Path.Combine(session, "package.zip");
+            UpdatePackage.RejectLinks(package);
+            if (plan.CreateBackup || File.Exists(Path.Combine(session, "journal.json")) ||
+                File.Exists(Path.Combine(session, "runner-ready.json")))
+                throw new InvalidDataException("此更新任务已尝试安装，不能作为下载缓存恢复。");
+            if (plan.PackageHash != expectedHash || new FileInfo(package).Length is < 22 or > UpdatePackage.MaxArchiveSize)
+                throw new InvalidDataException("已下载更新包的校验记录无效。");
+            await using (var stream = new FileStream(package, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true))
+                if (Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant() != expectedHash)
+                    throw new InvalidDataException("已下载更新包的 SHA-256 校验失败。");
+            var manifest = await UpdatePackage.ValidateAsync(package, Program.Version, ct);
+            if (manifest.Version != plan.TargetVersion) throw new InvalidDataException("已下载更新包的目标版本发生变化。");
+            plan.CurrentVersion = Program.Version;
+            plan.RestartArguments = _restartArguments;
+            plan.ParentProcessId = 0; plan.ParentStartTimeUtcTicks = 0;
+            UpdatePackage.WriteJson(Path.Combine(session, "plan.json"), plan);
+            _pending = plan;
+            return new UpdatePreview { Id = plan.Id, CurrentVersion = Program.Version, TargetVersion = manifest.Version,
+                ReleaseNotes = manifest.ReleaseNotes, FileCount = manifest.Files.Count, PackageSize = new FileInfo(package).Length,
+                ExpandedSize = manifest.Files.Sum(f => f.Size), CreateBackup = false };
+        }
+        finally { _gate.Release(); }
+    }
+
+    internal async Task DiscardSavedPendingAsync(string id, CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (Scheduled) throw new InvalidOperationException("安装已经开始，不能删除更新包。");
+            if (_pending?.Id == id) { DiscardPending(); return; }
+            DeleteUnstartedPackage(ReadPlan(id));
+        }
+        finally { _gate.Release(); }
+    }
+
+    private static void DeleteUnstartedPackage(UpdatePlan plan)
+    {
+        var session = UpdateInstaller.Session(plan);
+        UpdatePackage.RejectLinks(session);
+        if (plan.CreateBackup || File.Exists(Path.Combine(session, "journal.json")) ||
+            File.Exists(Path.Combine(session, "runner-ready.json"))) return;
+        foreach (var name in new[] { "package.zip", "plan.json" })
+        {
+            var path = Path.Combine(session, name); UpdatePackage.RejectLinks(path);
+            if (File.Exists(path)) File.Delete(path);
+        }
+        if (Directory.Exists(session) && !Directory.EnumerateFileSystemEntries(session).Any()) Directory.Delete(session, false);
+    }
+
     private void DiscardPending()
     {
         if (_pending == null) return;
-        var package = Path.Combine(UpdateInstaller.Session(_pending), "package.zip"); UpdatePackage.RejectLinks(package);
-        if (File.Exists(package)) File.Delete(package);
+        DeleteUnstartedPackage(_pending);
         _logs.Write("info", "update", "已取消待确认的本地更新。"); _pending = null;
     }
 

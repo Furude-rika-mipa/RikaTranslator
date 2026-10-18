@@ -20,6 +20,7 @@ public class AppSettings
     public int Concurrency { get; set; } = 2;
     public bool Enabled { get; set; } = true;
     public bool PrefetchEnabled { get; set; } = true;
+    public int PrefetchLines { get; set; } = 3;
     public string Theme { get; set; } = "system";
     public string Accent { get; set; } = "#3b82f6";
     public int Zoom { get; set; } = 100;

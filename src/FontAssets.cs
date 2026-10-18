@@ -89,6 +89,14 @@ public sealed class FontAssets
         ValidateBytes(bytes, Path.GetExtension(id));
         return bytes;
     }
+    public static byte[] ReadSourceFont(string sourcePath)
+    {
+        var path = Path.GetFullPath(sourcePath.Trim().Trim('"'));
+        RejectLinks(path);
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+        if (extension is not (".ttf" or ".otf")) throw new InvalidDataException("请选择 TTF 或 OTF 字体文件。");
+        var bytes = ReadBounded(path); ValidateBytes(bytes, extension); return bytes;
+    }
     private string AssetPath(string id)
     {
         if (!ValidId(id, "ttf|otf|bundle")) throw new InvalidOperationException("字体文件标识无效。");

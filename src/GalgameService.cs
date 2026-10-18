@@ -32,7 +32,7 @@ public sealed class GalgameService(DataStore store, TranslationService translati
     private string? _overlayGame;
     private readonly string _nativeDir = Path.Combine(UpdatePackage.ApplicationDirectory, "adapters", "galgame", "native");
     public static bool Supported(GameRecord game) => game.Architecture is "x86" or "x64";
-    public bool HasActiveSession { get { lock (_gate) return _active != null; } }
+    public bool HasActiveSession { get { lock (_gate) return _active != null && !_active.Stop.IsCancellationRequested && !_active.Worker.HasExited; } }
     private bool ComponentsPresent => new[] { "LunaHost64.dll", "LunaHook32.dll", "LunaHook64.dll", "LunaSubprocess32.exe", "LunaSubprocess64.exe" }.All(f => File.Exists(Path.Combine(_nativeDir, f))) && File.Exists(WorkerPath);
     private string WorkerPath => Path.Combine(UpdatePackage.ApplicationDirectory, "adapters", "galgame", "RikaHookWorker.exe");
     private sealed class Session(GameRecord game, int pid, Process process)
@@ -164,15 +164,38 @@ public sealed class GalgameService(DataStore store, TranslationService translati
         {
             Session? session; lock (_gate) session = _active?.GameId == gameId ? _active : null;
             if (session == null) return;
-            session.Stop.Cancel(); session.Selection.Cancel(); session.Queue.Writer.TryComplete();
-            try { await SendAsync(session, new { command = "stop" }); await session.Worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(3)); }
-            catch { try { if (!session.Worker.HasExited) session.Worker.Kill(entireProcessTree: true); } catch { } }
-            lock (session.Gate) { session.Stage = "stopped"; session.Connected = false; session.Embed = false; }
-            if (ToolkitWindow.Current != null && _overlayGame == gameId) await ToolkitWindow.OnUiAsync(() => _overlay?.Hide());
-            runtime.EndHook(gameId);
-            logs.Write("info", "hook", "Hook 已断开，游戏继续运行；重启游戏可完全清除本次注入状态。", gameId);
+            await StopSessionAsync(session);
         }
         finally { _lifecycle.Release(); }
+    }
+
+    public async Task<int> StopAllAsync(CancellationToken ct)
+    {
+        await _lifecycle.WaitAsync(ct);
+        try
+        {
+            Session? session; lock (_gate) session = _active;
+            if (session == null) return 0;
+            var wasActive = !session.Stop.IsCancellationRequested && !session.Worker.HasExited;
+            await StopSessionAsync(session);
+            return wasActive ? 1 : 0;
+        }
+        finally { _lifecycle.Release(); }
+    }
+
+    private async Task StopSessionAsync(Session session)
+    {
+        session.Stop.Cancel(); session.Selection.Cancel(); session.Queue.Writer.TryComplete();
+        lock (session.Gate)
+        {
+            session.Revision++; session.Stage = "stopped"; session.Connected = false;
+            session.Embed = false; session.DisplayStatus = "Hook 已断开";
+        }
+        try { await SendAsync(session, new { command = "stop" }); await session.Worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(3)); }
+        catch { try { if (!session.Worker.HasExited) session.Worker.Kill(entireProcessTree: true); } catch { } }
+        if (ToolkitWindow.Current != null && _overlayGame == session.GameId) await ToolkitWindow.OnUiAsync(() => _overlay?.Hide());
+        runtime.EndHook(session.GameId);
+        logs.Write("info", "hook", "Hook 已断开，游戏继续运行；重启游戏可完全清除本次注入状态。", session.GameId);
     }
     private Session Active(string gameId)
     {

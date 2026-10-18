@@ -9,7 +9,7 @@ namespace GameTranslateToolkit;
 
 internal static class Program
 {
-    public static string Version => typeof(Program).Assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "0.7.3";
+    public static string Version => typeof(Program).Assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "0.8.1";
     public const string DisplayName = "Rika Translator（梨花翻译工具）";
     [STAThread]
     static void Main(string[] args)
@@ -20,6 +20,18 @@ internal static class Program
         var dataDirectory = Path.GetFullPath(Option("--data-dir") ?? Path.Combine(GameTranslateToolkit.Updates.UpdatePackage.ApplicationDirectory, "data"));
         try
         {
+            if (Option("--make-tmp-job") is { } fontJob)
+            {
+                try { FontMaking.TmpFontMakerWorker.Run(fontJob, UpdatePackage.ApplicationDirectory); }
+                catch (Exception ex)
+                {
+                    var message = ex is InvalidDataException or ArgumentException ? ex.Message : "字体制作未能完成，请检查字体文件或减少字符数量。";
+                    UpdatePackage.WriteJson(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(fontJob))!, "worker-error.json"), message);
+                    UpdatePackage.WriteJson(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(fontJob))!, "worker-diagnostic.json"), new { errorType = ex.GetType().FullName, error = ex.Message });
+                    Environment.ExitCode = 1;
+                }
+                return;
+            }
             if (Option("--inspect-tmp-input") is { } fontInput)
             {
                 Updates.UpdatePackage.RejectLinks(fontInput);

@@ -7,7 +7,7 @@ function drawOnlineUpdates(s) {
   if (!panel) return;
   rikaOnlineState = s;
   const release = s.release;
-  const labels = {idle:'从 GitHub 获取正式发布的新版本。',checking:'正在检查 GitHub 新版本…',current:'当前已是最新版本。',available:'发现新版本，可以下载。',downloading:'正在下载更新…',preparing:'下载完成，正在校验和准备更新…',ready:'下载与校验完成，可以安装。',cancelled:'下载已取消，可以重新检查或下载。',error:'更新暂未完成，请重试。'};
+  const labels = {idle:'从 GitHub 获取正式发布的新版本。',verifying:'正在校验已下载的更新…',checking:'正在检查 GitHub 新版本…',current:'当前已是最新版本。',available:'发现新版本，可以下载。',downloading:'正在下载更新…',preparing:'下载完成，正在校验和准备更新…',ready:'更新已下载并校验，可以直接安装。',cancelled:'更新下载已取消或删除，可以重新检查或下载。',error:'更新暂未完成，请重试。'};
   const canDownload = release && ['available','error','cancelled'].includes(s.stage);
   const downloading = ['downloading','preparing'].includes(s.stage);
   panel.innerHTML = `<p class="card-description" role="status">${esc(labels[s.stage]||labels.idle)}</p>
@@ -16,11 +16,11 @@ function drawOnlineUpdates(s) {
     ${s.error?notice(esc(s.error),'error'):''}
     <div class="actions"><button class="btn" data-online-action="check" ${s.busy?'disabled':''}>${icon('refresh')}检查更新</button>
     ${canDownload?`<button class="btn primary" data-online-action="download" ${s.busy?'disabled':''}>${icon('download')}下载更新</button>`:''}
-    ${s.stage==='ready'&&s.preview?`<button class="btn primary" data-online-action="install" ${s.busy?'disabled':''}>${icon('download')}安装并重启</button>`:''}
+    ${s.stage==='ready'&&s.preview?`<button class="btn primary" data-online-action="install" ${s.busy?'disabled':''}>${icon('download')}安装并重启</button><button class="btn" data-online-action="discard" ${s.busy?'disabled':''}>${icon('trash')}删除已下载更新</button>`:''}
     ${downloading?'<button class="btn" data-online-action="cancel">取消下载</button>':''}
     <a class="btn" href="https://github.com/Furude-rika-mipa/RikaTranslator/releases" target="_blank" rel="noopener noreferrer">查看发布页</a></div>
     ${release?`<details class="advanced" ${s.stage==='available'?'open':''}><summary>更新说明</summary><div class="update-notes">${esc(release.notes)}</div></details>`:''}
-    <p class="tiny muted section-gap">不备份旧程序，保留游戏库、密钥、字体和译文。安装时工具会重启。</p>`;
+    <p class="tiny muted section-gap">下载完成后关闭软件会保留更新包，重开可继续安装，安装成功后自动清理。不备份旧程序，保留游戏库、密钥、字体和译文。安装时工具会重启。</p>`;
   clearTimeout(rikaUpdatePoll);
   if (s.busy) rikaUpdatePoll = setTimeout(() => loadOnlineUpdates(panel), 900);
 }
@@ -59,7 +59,7 @@ document.addEventListener('click', async event => {
       if (panel===document.getElementById('online-update-panel')) drawOnlineUpdates(status);
     } else if (action==='download' && rikaOnlineState?.release) {
       drawOnlineUpdates(await api('/api/updates/online/download',{method:'POST',body:{id:rikaOnlineState.release.id}}));
-    } else if (action==='cancel') {
+    } else if (action==='cancel' || action==='discard') {
       drawOnlineUpdates(await api('/api/updates/online/cancel',{method:'POST'}));
     }
   });

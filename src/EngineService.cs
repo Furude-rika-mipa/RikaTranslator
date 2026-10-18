@@ -25,6 +25,7 @@ public sealed partial class EngineService
     private const string Unity2022Font = "GameTranslateToolkitCJK-Unity2022.bundle";
     private const string Il2CppBuild = "6.0.0-be.788+5b766a3";
     private const string UnrealPackage = "UE4SS_v3.0.1-1160-g3f4037d2.zip";
+    private const string UnityVersionPattern = @"(?<![\d.])((?:20\d{2}|6000|[3456])\.\d+\.\d+[abfp]\d+(?:c\d+)?)(?![\dA-Za-z.])";
     private static readonly Dictionary<string, string> PackageHashes = new(StringComparer.OrdinalIgnoreCase)
     {
         ["BepInEx_win_x64_5.4.23.5.zip"] = "82F9878551030F54657792C0740D9D51A09500EEAE1FBA21106B0C441E6732C4",
@@ -99,13 +100,13 @@ public sealed partial class EngineService
                 result.Directory = root; result.Engine = "Unity";
                 var il2cpp = File.Exists(Path.Combine(root, "GameAssembly.dll")) || File.Exists(Path.Combine(unityData, "il2cpp_data", "Metadata", "global-metadata.dat"));
                 result.Backend = il2cpp ? "IL2CPP" : System.IO.Directory.Exists(Path.Combine(unityData, "Managed")) ? "Mono" : "unknown";
-                result.EngineVersion = FindVersion(ReadBounded(Path.Combine(unityData, "globalgamemanagers"), 2 * 1024 * 1024), @"((?:20\d{2}|[3456])\.\d+\.\d+[abfp]\d+)");
+                result.EngineVersion = FindVersion(ReadBounded(Path.Combine(unityData, "globalgamemanagers"), 2 * 1024 * 1024), UnityVersionPattern);
                 if (result.EngineVersion.Length == 0)
                 {
                     foreach (var binary in new[] { Path.Combine(root, "UnityPlayer.dll"), executable })
                     {
                         if (binary == null || !File.Exists(binary)) continue;
-                        try { result.EngineVersion = FindVersion(FileVersionInfo.GetVersionInfo(binary).ProductVersion ?? "", @"((?:20\d{2}|[3456])\.\d+\.\d+[abfp]\d+)"); } catch { }
+                        try { result.EngineVersion = FindVersion(FileVersionInfo.GetVersionInfo(binary).ProductVersion ?? "", UnityVersionPattern); } catch { }
                         if (result.EngineVersion.Length > 0) break;
                     }
                 }

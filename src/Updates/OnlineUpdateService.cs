@@ -10,7 +10,7 @@ public sealed record OnlineRelease(string Id, string Version, string Tag, string
 public sealed record OnlineUpdateState(string Stage, bool Busy, string CurrentVersion, OnlineRelease? Release,
     long DownloadedBytes, string Error, UpdatePreview? Preview);
 
-public sealed class OnlineUpdateService : IDisposable
+public sealed partial class OnlineUpdateService : IDisposable
 {
     public const string Repository = "Furude-rika-mipa/RikaTranslator";
     public const string ReleasesUrl = "https://github.com/" + Repository + "/releases";
@@ -71,26 +71,36 @@ public sealed class OnlineUpdateService : IDisposable
 
     public async Task<OnlineUpdateState> CheckAsync(CancellationToken ct)
     {
+        await InitializeAsync(ct);
         var operation = Begin("checking", ct);
         operation.CancelAfter(TimeSpan.FromSeconds(35));
         try
         {
-            UpdatePreview? previous;
-            lock (_gate) { previous = _preview; _preview = null; _release = null; }
-            if (previous != null) await _updates.CancelAsync(previous.Id, operation.Token);
             OnlineRelease? found;
             try { found = await ReadApiReleaseAsync(operation.Token); }
             catch (HttpRequestException) { found = await ReadPublicReleaseAsync(operation.Token); }
-            lock (_gate)
+            if (_saved?.Release is { } cached && _preview != null && found != null && SamePackage(cached, found))
             {
-                _release = found;
-                _stage = found != null && UpdatePackage.ParseVersion(found.Version) > UpdatePackage.ParseVersion(_current) ? "available" : "current";
+                lock (_gate) { _release = found; _stage = "ready"; _downloaded = found.Size; }
+            }
+            else
+            {
+                if (_saved != null) await DropSavedAsync(_saved, operation.Token);
+                lock (_gate)
+                {
+                    _release = found;
+                    _stage = found != null && UpdatePackage.ParseVersion(found.Version) > UpdatePackage.ParseVersion(_current) ? "available" : "current";
+                }
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or OperationCanceledException or JsonException or InvalidOperationException or KeyNotFoundException or FormatException or UnauthorizedAccessException)
         {
             // A metadata timeout is an error, while explicit cancellation stays quiet.
-            Failure(ex, ct.IsCancellationRequested || _cancelling ? operation.Token : CancellationToken.None);
+            if (_saved != null && _preview != null && !_cancelling)
+            {
+                lock (_gate) { _stage = "ready"; _error = ct.IsCancellationRequested ? "" : "暂时无法检查新版，已下载的更新仍可安装。"; }
+            }
+            else Failure(ex, ct.IsCancellationRequested || _cancelling ? operation.Token : CancellationToken.None);
         }
         finally { Finish(operation); }
         return Status();
@@ -144,7 +154,7 @@ public sealed class OnlineUpdateService : IDisposable
             var prepared = Path.Combine(scratch, "prepared.zip");
             await PortableUpdatePackage.ConvertAsync(archive, prepared, release.Version, release.Notes, ct);
             preview = await _updates.InspectAsync(prepared, ct, createBackup: false);
-            ct.ThrowIfCancellationRequested();
+            await SaveCacheAsync(release, preview, ct);
             lock (_gate) { _preview = preview; _stage = "ready"; }
             _logs.Write("info", "update", "GitHub 新版下载及校验完成，等待确认安装。", details: new { release.Version });
         }
@@ -161,6 +171,7 @@ public sealed class OnlineUpdateService : IDisposable
     }
     public async Task<OnlineUpdateState> CancelAsync(CancellationToken ct)
     {
+        await InitializeAsync(ct);
         Task? download;
         lock (_gate)
         {
@@ -172,9 +183,11 @@ public sealed class OnlineUpdateService : IDisposable
         {
             if (download != null) await download;
             UpdatePreview? preview;
-            lock (_gate) preview = _preview;
-            if (preview != null) await _updates.CancelAsync(preview.Id, ct);
-            lock (_gate) { _preview = null; _stage = "cancelled"; _error = ""; }
+            OnlineRelease? offer;
+            lock (_gate) { preview = _preview; offer = _release; }
+            if (_saved == null && preview != null) await _updates.CancelAsync(preview.Id, ct);
+            await DropSavedAsync(_saved, ct);
+            lock (_gate) { _preview = null; _release = offer; _stage = "cancelled"; _error = ""; }
         }
         finally { lock (_gate) _cancelling = false; }
         return Status();
@@ -294,6 +307,7 @@ public sealed class OnlineUpdateService : IDisposable
     public void Dispose()
     {
         lock (_gate) { _disposed = true; _cancel?.Cancel(); }
+        _shutdown.Cancel();
         if (_ownsHttp) _http.Dispose();
     }
 }

@@ -5,7 +5,7 @@
     <OutputType>WinExe</OutputType>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>0.7.8</Version>
+    <Version>0.8.1</Version>
     <AssemblyName>RikaTranslator</AssemblyName>
     <RootNamespace>GameTranslateToolkit</RootNamespace>
     <Title>Rika Translator</Title>
@@ -14,11 +14,12 @@
     <Description>使用自己的 OpenAI 兼容服务翻译游戏。</Description>
     <ApplicationIcon>wwwroot\assets\rika.ico</ApplicationIcon>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DefaultItemExcludes>$(DefaultItemExcludes);dist\**;data\**;updater\**;font-fixes\**;tools\**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="AssetsTools.NET"><HintPath>lib\AssetsTools.NET.dll</HintPath><Private>true</Private></Reference>
+    <PackageReference Include="FreeTypeSharp" Version="3.1.0" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
     <EmbeddedResource Include="wwwroot\assets\rika.ico" LogicalName="GameTranslateToolkit.RikaIcon" />
     <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
@@ -28,6 +29,7 @@
     <Content Include="licenses\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Remove="validation\**\*" />
     <Compile Remove="tests\**\*" />
+    <Compile Remove="licenses\**\*" />
     <Content Remove="tests\**\*" />
     <None Remove="tests\**\*" />
   </ItemGroup>

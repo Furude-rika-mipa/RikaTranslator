@@ -7,7 +7,7 @@ public sealed record PrefetchedLine(string Source, string Text);
 
 public sealed partial class TranslationService
 {
-    public const int PrefetchLines = 3;
+    public const int MaxPrefetchLines = 10;
     public const int PrefetchCharacters = 8192;
     private int _prefetchRequests;
 
@@ -27,6 +27,7 @@ public sealed partial class TranslationService
         // No credentials are returned, even indirectly; revision changes when a provider is edited.
         return Hash(JsonSerializer.Serialize(new {
             game.Id, gameEnabled = game.Enabled, globalEnabled = data.Settings.Enabled, data.Settings.PrefetchEnabled,
+            prefetchLines = Math.Clamp(data.Settings.PrefetchLines, 1, MaxPrefetchLines),
             providerId = provider?.Id, provider?.Revision, provider?.Model,
             from = First(game.SourceLanguage, data.Settings.SourceLanguage), to = First(game.TargetLanguage, data.Settings.TargetLanguage),
             data.Settings.Prompt, game.Context,
@@ -40,13 +41,15 @@ public sealed partial class TranslationService
         IReadOnlyList<string> sources, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (sources.Count is < 1 or > PrefetchLines || sources.Any(s => string.IsNullOrWhiteSpace(s) || s.Length > 4096) ||
+        if (sources.Count is < 1 or > MaxPrefetchLines || sources.Any(s => string.IsNullOrWhiteSpace(s) || s.Length > 4096) ||
             sources.Sum(s => s.Length) > PrefetchCharacters)
-            throw new ArgumentException("预读每次最多 3 句、共 8192 字符。");
+            throw new ArgumentException("预读每次最多 10 句、共 8192 字符。");
         var data = _store.Snapshot();
         var game = data.Games.FirstOrDefault(g => g.Id == gameId) ?? throw new InvalidOperationException("找不到当前游戏。");
         if (!SupportsPrefetch(game) || !data.Settings.PrefetchEnabled || !data.Settings.Enabled || !game.Enabled ||
             configuration != ConfigurationStamp(data, game)) return [];
+        if (sources.Count > Math.Clamp(data.Settings.PrefetchLines, 1, MaxPrefetchLines))
+            throw new ArgumentException("预读句数超过当前设置，请更新游戏适配后重试。");
         if (Interlocked.Increment(ref _prefetchRequests) > 4)
         { Interlocked.Decrement(ref _prefetchRequests); return []; }
         var waits = new List<Task<TranslationResult>>();

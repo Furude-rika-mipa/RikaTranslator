@@ -19,11 +19,17 @@ public static class ApiServer
         var unrealBridge = new UnrealFileBridge(store, translation, engines, runtime, logs);
         var galgame = new GalgameService(store, translation, runtime, logs);
         var online = new OnlineUpdateService(store.DirectoryPath, updates, logs);
+        var fontMaker = new FontMaking.TmpFontMakerService(store.DirectoryPath, UpdatePackage.ApplicationDirectory, logs, updates.EnterMutation, updates.ExitMutation);
         app.Lifetime.ApplicationStopping.Register(galgame.Dispose);
         app.Lifetime.ApplicationStopping.Register(online.Dispose);
+        app.Lifetime.ApplicationStopping.Register(fontMaker.Dispose);
         app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
         {
-            try { await updates.CleanupCompletedAsync(app.Lifetime.ApplicationStopping); }
+            try
+            {
+                await online.InitializeAsync(app.Lifetime.ApplicationStopping);
+                await updates.CleanupCompletedAsync(app.Lifetime.ApplicationStopping);
+            }
             catch (OperationCanceledException) { }
         }));
         app.Lifetime.ApplicationStarted.Register(() => _ = unrealBridge.RunAsync(app.Lifetime.ApplicationStopping));
@@ -70,10 +76,15 @@ public static class ApiServer
         app.UseDefaultFiles(); app.UseStaticFiles();
         app.MapGet("/api/session", () => new { token = uiToken });
         app.MapGet("/api/fonts", FontCatalog.Installed);
+        FontMaking.TmpFontMakerApi.Map(app, fontMaker);
         app.MapGet("/api/updates/status", () => updates.Status());
         app.MapPost("/api/updates/pick", async () => new { path = await ToolkitWindow.PickUpdateAsync() });
-        app.MapPost("/api/updates/inspect", async (JsonElement body, CancellationToken ct) => await updates.InspectAsync(Required(body, "path"), ct, Boolean(body, "createBackup") == true));
-        app.MapGet("/api/updates/online/status", online.Status);
+        app.MapPost("/api/updates/inspect", async (JsonElement body, CancellationToken ct) =>
+        {
+            await online.CancelAsync(ct);
+            return await updates.InspectAsync(Required(body, "path"), ct, Boolean(body, "createBackup") == true);
+        });
+        app.MapGet("/api/updates/online/status", async (CancellationToken ct) => { await online.InitializeAsync(ct); return online.Status(); });
         app.MapPost("/api/updates/online/check", async (CancellationToken ct) => await online.CheckAsync(ct));
         app.MapPost("/api/updates/online/download", (JsonElement body) => online.StartDownload(Required(body, "id")));
         app.MapPost("/api/updates/online/cancel", async (CancellationToken ct) => await online.CancelAsync(ct));
@@ -136,6 +147,12 @@ public static class ApiServer
             settings.Concurrency = Math.Clamp(Integer(body, "concurrency") ?? settings.Concurrency, 1, 16);
             settings.Enabled = Boolean(body, "enabled") ?? settings.Enabled;
             settings.PrefetchEnabled = Boolean(body, "prefetchEnabled") ?? settings.PrefetchEnabled;
+            if (body.TryGetProperty("prefetchLines", out var prefetchLines))
+            {
+                if (prefetchLines.ValueKind != JsonValueKind.Number || !prefetchLines.TryGetInt32(out var count) ||
+                    count is < 1 or > TranslationService.MaxPrefetchLines) throw new ArgumentException("预读句数应为 1–10 的整数。");
+                settings.PrefetchLines = count;
+            }
             var theme = Text(body, "theme"); if (theme is "dark" or "light" or "system") settings.Theme = theme;
             var accent = Text(body, "accent"); if (accent != null && Regex.IsMatch(accent, "^#[0-9a-fA-F]{6}$")) settings.Accent = accent;
             settings.Zoom = Math.Clamp(Integer(body, "zoom") ?? settings.Zoom, 75, 150);
@@ -157,6 +174,7 @@ public static class ApiServer
         });
         app.MapGet("/api/games/{id}", (string id) => PublicGame(FindGame(id)));
         app.MapGet("/api/games/{id}/hook", (string id) => galgame.Snapshot(FindGame(id)));
+        app.MapPost("/api/hooks/stop-all", async (CancellationToken ct) => new { stopped = await galgame.StopAllAsync(ct) });
         app.MapGet("/api/games/{id}/hook/processes", (string id) => GalgameService.Processes(FindGame(id)));
         app.MapPost("/api/games/{id}/hook/start", async (string id, JsonElement body, CancellationToken ct) => await galgame.StartAsync(FindGame(id), Integer(body, "pid") ?? 0, Boolean(body, "launch") ?? false, ct));
         app.MapPost("/api/games/{id}/hook/stop", async (string id) => { FindGame(id); await galgame.StopAsync(id); return new { stopped = true }; });
@@ -293,7 +311,7 @@ public static class ApiServer
             var gate = gameLocks.GetOrAdd(id, _ => new SemaphoreSlim(1, 1)); await gate.WaitAsync();
             try {
             var game = FindGame(id);
-            if (game.AdapterStatus == "installed" || engines.AdapterStatus(game) != "not-installed") throw new InvalidOperationException("请先卸载或恢复本工具适配，再从游戏库移除，避免留下无法管理的组件。");
+            if (game.AdapterStatus == "installed" || engines.AdapterStatus(game) != "not-installed") throw new InvalidOperationException("请先卸载或恢复本工具适配；如果是残留或冲突，可在游戏详情使用“清理残留”，处理后再从游戏库移除。");
             await galgame.StopAsync(id);
             await store.UpdateAsync(d => d.Games.RemoveAll(g => g.Id == id)); return Results.Ok(new { success = true });
             } finally { gate.Release(); }
@@ -329,6 +347,29 @@ public static class ApiServer
             return await Adapt(id, true, ct, fontMode);
         });
         app.MapPost("/api/games/{id}/uninstall", async (string id, CancellationToken ct) => await Adapt(id, false, ct));
+        app.MapGet("/api/games/{id}/cleanup", (string id) => engines.CleanupPreview(FindGame(id)));
+        app.MapPost("/api/games/{id}/cleanup", async (string id, JsonElement body, CancellationToken ct) =>
+        {
+            if (Boolean(body, "confirmed") != true) throw new ArgumentException("请先查看清理范围并确认。");
+            var gate = gameLocks.GetOrAdd(id, _ => new SemaphoreSlim(1, 1)); await gate.WaitAsync(ct);
+            try
+            {
+                var game = FindGame(id);
+                ComponentCleanupResult result;
+                try { result = await engines.CleanupAsync(game, Required(body, "fingerprint"), Boolean(body, "deleteBackups") == true, ct); }
+                catch
+                {
+                    try { var status = engines.AdapterStatus(game); await store.UpdateAsync(data => { var current = data.Games.FirstOrDefault(item => item.Id == id); if (current != null) current.AdapterStatus = status; }); } catch { }
+                    throw;
+                }
+                GameRecord? saved = null;
+                await store.UpdateAsync(data => { saved = data.Games.FirstOrDefault(item => item.Id == id) ?? throw new KeyNotFoundException("游戏记录不存在。"); saved.AdapterStatus = game.AdapterStatus; saved.BridgeToken = game.BridgeToken; });
+                if (game.AdapterStatus == "not-installed") await galgame.StopAsync(id);
+                runtime.Reset(id);
+                return new { game = PublicGame(saved!), cleanup = result };
+            }
+            finally { gate.Release(); }
+        });
         app.MapPost("/api/games/{id}/recheck", async (string id) =>
         {
             var game = FindGame(id); var detection = engines.Inspect(game.ExecutablePath);
@@ -377,8 +418,8 @@ public static class ApiServer
         app.MapPost("/bridge/prefetch", async (JsonElement body, HttpContext context, CancellationToken ct) =>
         {
             var game = VerifyBridge(Required(body, "gameId"), Required(body, "token"), context);
-            if (!body.TryGetProperty("texts", out var texts) || texts.ValueKind != JsonValueKind.Array || texts.GetArrayLength() is < 1 or > TranslationService.PrefetchLines)
-                throw new ArgumentException("预读每次最多 3 句。");
+            if (!body.TryGetProperty("texts", out var texts) || texts.ValueKind != JsonValueKind.Array || texts.GetArrayLength() is < 1 or > TranslationService.MaxPrefetchLines)
+                throw new ArgumentException("预读每次最多 10 句。");
             var sources = texts.EnumerateArray().Select(t => t.ValueKind == JsonValueKind.String ? t.GetString()! : throw new ArgumentException("预读文本格式无效。")).ToArray();
             var configuration = Required(body, "configuration");
             var items = await translation.PrefetchAsync(game.Id, configuration, sources, ct);
@@ -407,6 +448,7 @@ public static class ApiServer
             var settings = store.Snapshot().Settings;
             return Results.Ok(new { received = true, enabled = game.Enabled && settings.Enabled,
                 prefetchEnabled = game.Enabled && settings.Enabled && settings.PrefetchEnabled && TranslationService.SupportsPrefetch(game),
+                prefetchLines = Math.Clamp(settings.PrefetchLines, 1, TranslationService.MaxPrefetchLines),
                 configuration = translation.ConfigurationStamp(game.Id),
                 targetLanguage = string.IsNullOrEmpty(game.TargetLanguage) ? settings.TargetLanguage : game.TargetLanguage });
         });

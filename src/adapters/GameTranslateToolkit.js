@@ -12,6 +12,7 @@
     var statusSession = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
     var maxParallel = 3, maxQueued = 256, maxCache = 5000;
     var enabled = true, prefetchEnabled = false, configuration = "", cacheRevision = 0;
+    var prefetchLines = 3;
     var messagePlan = null, prefetchJob = null, prefetchRetry = 0;
     var controls = /(?:\\(?:[A-Za-z]+(?:\[[^\]\r\n]*\])?|[\\{}$.|!><^])|\x1b(?:[A-Za-z]+(?:\[[^\]\r\n]*\])?|[{}$.|!><^])|%\d*\$?[sdiuf]|\{[^{}\r\n]*\})/g;
 
@@ -97,7 +98,7 @@
         var texts = [], characters = 0;
         // Only commands without script execution, branching or game-variable changes may be crossed.
         var visual = [230, 212, 213, 221, 222, 223, 224, 225, 231, 232, 233, 234, 235, 241, 242, 245, 246, 249, 250, 251];
-        for (var i = plan.index, stop = Math.min(plan.list.length, plan.index + 128); i < stop && texts.length < 3; i++) {
+        for (var i = plan.index, stop = Math.min(plan.list.length, plan.index + 128); i < stop && texts.length < prefetchLines; i++) {
             var command = plan.list[i];
             if (!command || command.indent !== plan.indent) break;
             if (command.code === 101) {
@@ -273,6 +274,8 @@
                     if (data.configuration) configuration = data.configuration;
                     enabled = data.enabled !== false;
                     prefetchEnabled = data.prefetchEnabled === true;
+                    var nextLines = Number.isInteger(data.prefetchLines) ? Math.max(1, Math.min(10, data.prefetchLines)) : 3;
+                    if (nextLines !== prefetchLines) { prefetchLines = nextLines; cancelPrefetch(); prefetchRetry = 0; }
                     if (!prefetchEnabled || !enabled) cancelPrefetch();
                     if (messagePlan && cache[messagePlan.current]) prefetch(messagePlan.current);
                 } catch (_) {}
@@ -284,6 +287,6 @@
     if (typeof setInterval === "function") setInterval(reportStatus, 5000);
     window.GameTranslateToolkitAdapter = { version: "0.7.8", translate: translate, request: request,
         stats: function () { return { cached: cacheKeys.length, queued: jobs.length, active: active, applied: applied,
-            prefetchEnabled: prefetchEnabled, prefetching: !!prefetchJob }; } };
+            prefetchEnabled: prefetchEnabled, prefetchLines: prefetchLines, prefetching: !!prefetchJob }; } };
     console.info("[Game Translate Toolkit] RPG Maker MV/MZ 适配器已加载，原文先显示，译文异步更新。");
 })();

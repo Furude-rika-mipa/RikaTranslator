@@ -15,6 +15,7 @@
     var enabled = false, applied = 0, heartbeatBusy = false, lastWarning = -60000;
     var cache = new Map(), pending = new Map(), retryAt = new Map();
     var prefetchEnabled = false, configuration = "", cacheRevision = 0, prefetchJob = null, prefetchRetry = 0;
+    var prefetchLines = 3;
     var session = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
     var controls = /(?:\\[A-Za-z]+(?:\[[^\]\r\n]*\])?|%\d*\$?[sdiuf]|\{[^{}\r\n]*\})/g;
 
@@ -114,7 +115,7 @@
             !((typeof H_RPGX !== "undefined" && s.type === H_RPGX) || (typeof STORY_RPGX !== "undefined" && s.type === STORY_RPGX))) return [];
         var lines = [], candidate = null, characters = 0;
         var visual = /^(?:GROUP|\/GROUP|NAME_PLATE|VOICE_PLAY|SPINE|SPINE_PLAY|SPINE_EFFECT|SPINE_WAIT|SPINE_IMAGE|ACTOR|ACTOR_FRONT|ACTOR_OUT|ACTOR_PRIORITY|VIDEO_PLAY|VIDEO_STOP|BG|BG_OUT|BGM_PLAY|BGM_STOP|EFFECT_FLASH|EFFECT_QUAKE|EV|EV_OUT|FADE|FADE_IN|FADE_IN2|FADE_OUT|FADE_OUT2|SE_PLAY|SE_STOP|TRANSITION|TXT_CLEAR|UI_DISP|WAIT|WAIT2)$/;
-        for (var i = s.index; i < Math.min(s.script.length, s.index + 128) && lines.length < 3; i++) {
+        for (var i = s.index; i < Math.min(s.script.length, s.index + 128) && lines.length < prefetchLines; i++) {
             var command = s.script[i];
             if (typeof command !== "string" || command.length > 16384) break;
             var match = command.match(/^<([^=]*?)>(.*)/);
@@ -233,6 +234,8 @@
                 cancelPrefetch(); prefetchRetry = 0;
             }
             prefetchEnabled = result.prefetchEnabled === true;
+            var nextLines = Number.isInteger(result.prefetchLines) ? Math.max(1, Math.min(10, result.prefetchLines)) : 3;
+            if (nextLines !== prefetchLines) { prefetchLines = nextLines; cancelPrefetch(); prefetchRetry = 0; }
             enabled = result.enabled === true;
             if (!prefetchEnabled || !enabled) cancelPrefetch();
             if (ui) ui.setEnabled(enabled && /^zh(?:-|$)/i.test(result.targetLanguage || config.uiLanguage || "zh-CN"));
@@ -249,7 +252,7 @@
     window.RikaNwAdapter = {
         version: "0.7.8",
         getState: function () { return { enabled: enabled, applied: applied, cacheSize: cache.size, pending: pending.size, bound: !!box,
-            prefetchEnabled: prefetchEnabled, prefetching: !!prefetchJob, ui: ui ? ui.getState() : null }; }
+            prefetchEnabled: prefetchEnabled, prefetchLines: prefetchLines, prefetching: !!prefetchJob, ui: ui ? ui.getState() : null }; }
     };
     window.addEventListener("resize", function () { setTimeout(layoutTranslation, 0); });
     changed(); heartbeat();
