@@ -1,0 +1,3 @@
+LIBRARY RikaScriptPatch
+EXPORTS
+    CreatePlugin @1

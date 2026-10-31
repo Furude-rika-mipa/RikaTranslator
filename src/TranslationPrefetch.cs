@@ -21,7 +21,7 @@ public sealed partial class TranslationService
         return ConfigurationStamp(data, game);
     }
 
-    private static string ConfigurationStamp(AppData data, GameRecord game)
+    internal static string ConfigurationStamp(AppData data, GameRecord game)
     {
         var provider = data.Providers.FirstOrDefault(p => p.Id == First(game.ProviderId, data.Settings.ProviderId));
         // No credentials are returned, even indirectly; revision changes when a provider is edited.
@@ -37,8 +37,18 @@ public sealed partial class TranslationService
         }));
     }
 
-    public async Task<IReadOnlyList<PrefetchedLine>> PrefetchAsync(string gameId, string configuration,
+    public Task<IReadOnlyList<PrefetchedLine>> PrefetchAsync(string gameId, string configuration,
         IReadOnlyList<string> sources, CancellationToken ct)
+        => PrefetchCoreAsync(gameId, configuration, sources, false, ct);
+
+    // Explicitly selected, extracted script lines are independent of runtime pre-reading support.
+    // The authenticated document API supplies the selection; game bridges cannot use this entry point.
+    public Task<IReadOnlyList<PrefetchedLine>> TranslateExtractedAsync(string gameId, string configuration,
+        IReadOnlyList<string> sources, CancellationToken ct)
+        => PrefetchCoreAsync(gameId, configuration, sources, true, ct);
+
+    private async Task<IReadOnlyList<PrefetchedLine>> PrefetchCoreAsync(string gameId, string configuration,
+        IReadOnlyList<string> sources, bool extracted, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (sources.Count is < 1 or > MaxPrefetchLines || sources.Any(s => string.IsNullOrWhiteSpace(s) || s.Length > 4096) ||
@@ -46,9 +56,9 @@ public sealed partial class TranslationService
             throw new ArgumentException("预读每次最多 10 句、共 8192 字符。");
         var data = _store.Snapshot();
         var game = data.Games.FirstOrDefault(g => g.Id == gameId) ?? throw new InvalidOperationException("找不到当前游戏。");
-        if (!SupportsPrefetch(game) || !data.Settings.PrefetchEnabled || !data.Settings.Enabled || !game.Enabled ||
+        if ((!extracted && (!SupportsPrefetch(game) || !data.Settings.PrefetchEnabled)) || !data.Settings.Enabled || !game.Enabled ||
             configuration != ConfigurationStamp(data, game)) return [];
-        if (sources.Count > Math.Clamp(data.Settings.PrefetchLines, 1, MaxPrefetchLines))
+        if (!extracted && sources.Count > Math.Clamp(data.Settings.PrefetchLines, 1, MaxPrefetchLines))
             throw new ArgumentException("预读句数超过当前设置，请更新游戏适配后重试。");
         if (Interlocked.Increment(ref _prefetchRequests) > 4)
         { Interlocked.Decrement(ref _prefetchRequests); return []; }

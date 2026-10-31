@@ -9,7 +9,7 @@ public sealed partial class EngineService
     public static bool IsGalgameEngine(string engine) => engine is
         "KiriKiri" or "NScripter" or "SiglusEngine" or "BGI / Ethornell" or "YU-RIS" or
         "CatSystem2" or "Artemis" or "Malie" or "WillPlus" or "Lucifen" or "Silky's" or
-        "CMVS" or "Majiro" or "Nitroplus" or "SoftPal" or "RealLive" or "AliceSoft System4" or "Eushully AGE" or "QLIE";
+        "CMVS" or "Majiro" or "Nitroplus" or "SoftPal" or "RealLive" or "AliceSoft System4" or "Eushully AGE" or "QLIE" or "ExHIBIT" or "Escu:de";
 
     // Inspect only known resource locations and small headers, never recursively read a library.
     private static bool DetectGalgame(DetectionResult result, string root, string? executable)
@@ -34,6 +34,30 @@ public sealed partial class EngineService
             result.Engine = engine; result.Backend = "Native";
             result.DetectionNotes = evidence + "；取词和内嵌能力以实际 Hook 通道为准。";
             return true;
+        }
+        if (Has("ExHIBIT.ini") && Has("resident.dll") && Directory.Exists(Path.Combine(root, "rld")))
+        {
+            try
+            {
+                var header = new byte[4];
+                if ((File.GetAttributes(Path.Combine(root, "rld")) & FileAttributes.ReparsePoint) == 0)
+                    foreach (var file in Directory.EnumerateFiles(Path.Combine(root, "rld"), "*.rld").Take(10))
+                        if (Has("rld/" + Path.GetFileName(file)))
+                        {
+                            using var input = File.OpenRead(file);
+                            if (input.Read(header) == 4 && header.AsSpan().SequenceEqual("\0DLR"u8)) return Set("ExHIBIT", "发现 ExHIBIT 运行库与 RLD 剧本文件头");
+                        }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+        if (Has("script.bin"))
+        {
+            try
+            {
+                using var input = File.OpenRead(Path.Combine(root, "script.bin")); Span<byte> header = stackalloc byte[8];
+                if (input.Read(header) == 8 && header.SequenceEqual("ESC-ARC2"u8)) return Set("Escu:de", "script.bin 具有 ESC-ARC2 封包文件头");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
         if (description.Contains("Ethornell", StringComparison.OrdinalIgnoreCase) ||
             description.Contains("BURIKO General Interpreter", StringComparison.OrdinalIgnoreCase) ||

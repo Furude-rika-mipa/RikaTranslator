@@ -299,7 +299,8 @@ public sealed partial class TranslationService
         return new TranslationResult { Text = text, Cached = true, RequestId = id, ElapsedMs = 0 };
     }
 
-    private async Task<TranslationResult> ExecuteAsync(RequestContext context, CancellationToken ct, bool background = false, Func<bool>? demanded = null)
+    private async Task<TranslationResult> ExecuteAsync(RequestContext context, CancellationToken ct, bool background = false, Func<bool>? demanded = null,
+        bool scriptBatch = false)
     {
         var requestId = Guid.NewGuid().ToString("N");
         var watch = Stopwatch.StartNew();
@@ -308,7 +309,8 @@ public sealed partial class TranslationService
         {
             _logs.Write("Debug", "translation", "翻译请求进入队列", context.GameId, requestId,
                 new { providerId = context.Provider.Id, characters = context.Input.Text.Length, test = context.Test });
-            await AcquireAsync(ct, background, demanded);
+            if (scriptBatch) ChangeStats(s => s.InFlight++);
+            else await AcquireAsync(ct, background, demanded);
             acquired = true;
             if (!context.Test)
             {
@@ -325,10 +327,11 @@ public sealed partial class TranslationService
             ApiOutput output;
             try
             {
-                output = await RequestWithRetryAsync(context, body, requestId, timeout.Token);
+                output = await RequestWithRetryAsync(context, body, requestId, timeout.Token, allowRetry: !scriptBatch);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
+                if (scriptBatch) throw new TranslationApiException("AI 翻译超时。", true, TimeSpan.FromSeconds(2));
                 throw new InvalidOperationException("AI 翻译超时，请检查服务或调整超时时间。");
             }
             var translated = Restore(output.Text, protectedText);
@@ -371,11 +374,12 @@ public sealed partial class TranslationService
             var safe = ex is InvalidOperationException ? ex.Message : "翻译处理失败，请查看服务配置和本地数据目录。";
             _logs.Write("Error", "translation", safe, context.GameId, requestId,
                 new { providerId = context.Provider.Id, errorType = ex.GetType().Name });
+            if (ex is TranslationApiException) throw;
             throw new InvalidOperationException(safe);
         }
         finally
         {
-            if (acquired) Release(background);
+            if (acquired) { if (scriptBatch) ChangeStats(s => s.InFlight--); else Release(background); }
         }
     }
 
@@ -431,9 +435,10 @@ public sealed partial class TranslationService
         ChangeStats(s => s.InFlight--);
     }
 
-    private async Task<ApiOutput> RequestWithRetryAsync(RequestContext context, string body, string requestId, CancellationToken ct)
+    private async Task<ApiOutput> RequestWithRetryAsync(RequestContext context, string body, string requestId, CancellationToken ct, bool allowRetry = true)
     {
-        for (var attempt = 0; attempt < 3; attempt++)
+        var attempts = allowRetry ? 3 : 1;
+        for (var attempt = 0; attempt < attempts; attempt++)
         {
             try
             {
@@ -446,8 +451,14 @@ public sealed partial class TranslationService
                         || (context.Provider.Stream && !string.Equals(type, "application/json", StringComparison.OrdinalIgnoreCase));
                     return streaming ? await ReadStreamAsync(response.Content, ct) : ParseResponse(await ReadBoundedAsync(response.Content, ct));
                 }
-                var retryable = response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500;
-                if (attempt < 2 && retryable)
+                var retryable = response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.RequestTimeout || (int)response.StatusCode >= 500;
+                if (!allowRetry)
+                {
+                    var retry = response.Headers.RetryAfter?.Delta ?? (response.Headers.RetryAfter?.Date is { } date ? date - DateTimeOffset.UtcNow : TimeSpan.FromSeconds(2));
+                    throw new TranslationApiException(HttpFailure(response.StatusCode), retryable,
+                        TimeSpan.FromSeconds(Math.Clamp(retry.TotalSeconds, 1, 900)));
+                }
+                if (attempt < attempts - 1 && retryable)
                 {
                     var retryAfter = response.Headers.RetryAfter?.Delta
                         ?? (response.Headers.RetryAfter?.Date is { } date ? date - DateTimeOffset.UtcNow : null);
@@ -462,13 +473,14 @@ public sealed partial class TranslationService
                 }
                 throw new InvalidOperationException(HttpFailure(response.StatusCode));
             }
-            catch (HttpRequestException) when (attempt < 2 && !ct.IsCancellationRequested)
+            catch (HttpRequestException) when (attempt < attempts - 1 && !ct.IsCancellationRequested)
             {
                 _logs.Write("Warning", "api", "AI 服务网络连接中断，将重试", context.GameId, requestId, new { retry = attempt + 1 });
                 await Task.Delay(500 * (attempt + 1), ct);
             }
             catch (HttpRequestException)
             {
+                if (!allowRetry) throw new TranslationApiException("无法连接 AI 服务。", true, TimeSpan.FromSeconds(2));
                 throw new InvalidOperationException("无法连接 AI 服务，请检查接口地址、网络或证书。");
             }
             catch (JsonException)

@@ -21,10 +21,20 @@ public class AppSettings
     public bool Enabled { get; set; } = true;
     public bool PrefetchEnabled { get; set; } = true;
     public int PrefetchLines { get; set; } = 3;
+    public int McpBatchLines { get; set; } = 8;
+    public ScriptTranslationSettings ScriptTranslation { get; set; } = new();
     public string Theme { get; set; } = "system";
     public string Accent { get; set; } = "#3b82f6";
     public int Zoom { get; set; } = 100;
 }
+
+public sealed class ScriptTranslationSettings
+{
+    public bool MultiProvider { get; set; }
+    public List<ScriptProviderLimit> Providers { get; set; } = [];
+}
+
+public sealed record ScriptProviderLimit(string ProviderId, int Concurrency = 1);
 
 public class ProviderRecord
 {

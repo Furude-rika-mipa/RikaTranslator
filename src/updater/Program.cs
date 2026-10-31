@@ -26,6 +26,8 @@ internal static class Program
             bool owned;
             try { owned = mutex.WaitOne(0); } catch (AbandonedMutexException) { owned = true; }
             if (!owned) throw new InvalidOperationException("此程序目录的另一次更新还在执行。");
+            using var mcpConnections = McpLifetime.StopConnections(plan.TargetDirectory);
+            Thread.Sleep(300);
             try
             {
                 UpdatePackage.WriteJson(Path.Combine(session, "runner-ready.json"), new { plan.Id, processId = Environment.ProcessId });

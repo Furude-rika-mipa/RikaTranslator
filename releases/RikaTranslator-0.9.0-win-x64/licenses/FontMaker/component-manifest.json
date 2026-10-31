@@ -1,0 +1,81 @@
+{
+  "reference": "https://github.com/HanFengRuYue/XUnityToolkit-WebUI",
+  "referenceVersion": "4.9.202604121416+18debf84a2a9549cb0709e169283f961d2d79c0b",
+  "algorithmSourceCommit": "8457137447b69d342f004dcf6ce0b37fb0a8701d",
+  "templates": [
+    {
+      "id": "2018",
+      "label": "Unity 2018",
+      "unityVersion": "2018.4.36f1",
+      "tmpVersion": "1.1.0",
+      "file": "tmp-2018.bundle",
+      "sha256": "2fc115318a5a36d6ee48832ebc7b09ba45377840856987291c14159cf79954dc",
+      "sourceFile": "SourceHanSans_U2018",
+      "sourceSha256": "024d1ab464309502dd0572d88c94811e98523fd69641fc9e1d4384da7c4f89c9"
+    },
+    {
+      "id": "2019",
+      "label": "Unity 2019",
+      "unityVersion": "2019.4.41f2",
+      "tmpVersion": "1.1.0",
+      "file": "tmp-2019.bundle",
+      "sha256": "a7e2feb38abb81a4b9e95e44cdd9ddbcd87808c8602c2bc9ddd3f1f2a7cc0543",
+      "sourceFile": "SourceHanSans_U2019",
+      "sourceSha256": "3a2ef4fea96a3b5e15668f0f082d37629bf129d2b5ac9d6c580c6e76c0966d36"
+    },
+    {
+      "id": "2020",
+      "label": "Unity 2020",
+      "unityVersion": "2020.3.49f1",
+      "tmpVersion": "1.1.0",
+      "file": "tmp-2020.bundle",
+      "sha256": "4c8c4e9ffb20b83a4a47dacaa5315a5a3be892c1944a9b99813d7b39b4050344",
+      "sourceFile": "SourceHanSans_U2020",
+      "sourceSha256": "9fc9dbd617c3cc41a3ecbf443eb07ee54c17d4d3329be5300887dc47e6b2e75f"
+    },
+    {
+      "id": "2021",
+      "label": "Unity 2021",
+      "unityVersion": "2021.3.45f2c1",
+      "tmpVersion": "1.1.0",
+      "file": "tmp-2021.bundle",
+      "sha256": "247f258a21b9c44a44a7abe521461b6ef1474283b76ac15c91dc44ed48daa2bd",
+      "sourceFile": "SourceHanSans_U2021",
+      "sourceSha256": "f6bd87e1463ed50a83c74a581e1c884ff00c49d99ccaf2d8bd63d7bb08d4530b"
+    },
+    {
+      "id": "2022",
+      "label": "Unity 2022",
+      "unityVersion": "2022.3.62f3",
+      "tmpVersion": "1.1.0",
+      "file": "tmp-2022.bundle",
+      "sha256": "489749103e6f6990e7ddbbb3f93a99d016c9b8af3c9dcfadd7ccc7ac62da5ce6",
+      "sourceFile": "SourceHanSans_U2022",
+      "sourceSha256": "7d7672f9e4c6879846a87c804f9e889e4e15c0ce3695c86ae4cf369d8dd5c125"
+    },
+    {
+      "id": "6000",
+      "label": "Unity 6",
+      "unityVersion": "6000.4.0f1",
+      "tmpVersion": "1.1.0",
+      "file": "tmp-6000.bundle",
+      "sha256": "97784bd5e072b3a2905293149aab9bb130d3d28855f0981c5cade12ed3060a4a",
+      "sourceFile": "SourceHanSans_U6000",
+      "sourceSha256": "f54f14dcc982d2269dd23616f1ede7cd583a0d6a170f3b2f8ad32082a5c9d0f4"
+    }
+  ],
+  "binaries": [
+    {
+      "name": "FreeTypeSharp.dll",
+      "sha256": "1003da40420f4fb1eefa974e071de3fd9412ac704454b0078022357025bd74ef",
+      "source": "NuGet FreeTypeSharp 3.1.0",
+      "bytes": 43520
+    },
+    {
+      "name": "freetype.dll",
+      "sha256": "aab9691dab5f26acad2d8683262e98b91fd97330c7fe3cafcbcd1cc0ab8a9cab",
+      "source": "NuGet FreeTypeSharp 3.1.0",
+      "bytes": 818176
+    }
+  ]
+}

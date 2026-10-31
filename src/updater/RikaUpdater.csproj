@@ -13,5 +13,6 @@
   <ItemGroup>
     <Compile Include="..\Updates\UpdatePackage.cs" Link="UpdatePackage.cs" />
     <Compile Include="..\Updates\UpdateInstaller.cs" Link="UpdateInstaller.cs" />
+    <Compile Include="..\Updates\McpLifetime.cs" Link="McpLifetime.cs" />
   </ItemGroup>
 </Project>

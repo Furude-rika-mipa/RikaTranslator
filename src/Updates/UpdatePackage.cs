@@ -33,7 +33,14 @@ public static class UpdatePackage
     public const long MaxExpandedSize = 3L * 1024 * 1024 * 1024;
     public static readonly string[] RequiredFiles = ["RikaTranslator.exe", "RikaTranslator.dll", "RikaTranslator.deps.json", "RikaTranslator.runtimeconfig.json", "RikaUpdater.exe", "RikaUpdater.dll", "RikaUpdater.deps.json", "RikaUpdater.runtimeconfig.json", "wwwroot/index.html", "wwwroot/app.js", "wwwroot/styles.css", "hostpolicy.dll", "hostfxr.dll", "coreclr.dll", "System.Private.CoreLib.dll"];
     public static string[] RequiredFor(string layout) => layout == "runtime" ? RequiredFiles.Select(p => p.EndsWith(".exe") || p.StartsWith("wwwroot/") ? p : "runtime/" + p).ToArray() : RequiredFiles;
-    public static string ApplicationDirectory => Environment.ProcessPath is { } executable && Path.GetFileNameWithoutExtension(executable) is "RikaTranslator" or "RikaUpdater" ? Path.GetDirectoryName(executable)! : AppContext.BaseDirectory;
+    public static string ApplicationDirectory => ResolveApplicationDirectory(Environment.ProcessPath, AppContext.BaseDirectory);
+    public static string ResolveApplicationDirectory(string? executable, string baseDirectory)
+    {
+        var name = Path.GetFileNameWithoutExtension(executable);
+        return executable != null && (string.Equals(name, "RikaTranslator", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "RikaUpdater", StringComparison.OrdinalIgnoreCase))
+            ? Path.GetDirectoryName(executable)! : baseDirectory;
+    }
     public static string DetectLayout(string root) => File.Exists(Path.Combine(root, "runtime", "RikaTranslator.dll")) ? "runtime" : "flat";
 
     public static Version ParseVersion(string text)

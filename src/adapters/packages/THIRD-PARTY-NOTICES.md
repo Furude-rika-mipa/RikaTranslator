@@ -23,3 +23,7 @@ The IL2CPP package's first run can fetch the Unity base-library archive configur
 Reinstall over retained generated data requires a matching toolkit `removed` manifest for the same game identity and absolute directory, with the native loader previously owned by this toolkit. It accepts only the known generated cache/config/log directories and safe data extensions. Existing core/plugin DLLs, native DLLs or scripts masquerading as generated data, unknown directories and links cause a conflict. Reuse of an existing IL2CPP 6 runtime also requires byte-for-byte matches for the tested BepInEx 788 Core/Unity assemblies and Il2CppInterop dependencies; matching `AssemblyVersion=6.0.0.0` alone does not establish compatibility with other bleeding-edge builds.
 
 RPG Maker and Ren'Py adapters in the enclosing adapters directory are original MIT-licensed toolkit code. RPG Maker game runtimes and Ren'Py runtimes themselves are not bundled here.
+
+## Independent KiriKiri script patch loader
+
+RikaPatchLauncher and RikaScriptPatch use GPL-3.0 stream interception/import stubs adapted from crskycode/KrkrPatch, with Microsoft Detours under MIT. Their complete corresponding source, build instructions, upstream commits and notices are in `licenses/ScriptPatch/`. Every generated game patch carries these sources and licenses. KiriKiri ABI declarations retain the W.Dee/contributors notice. See `licenses/ScriptPatch/NOTICE.md`.

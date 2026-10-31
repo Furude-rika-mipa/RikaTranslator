@@ -9,7 +9,7 @@ namespace GameTranslateToolkit;
 
 internal static class Program
 {
-    public static string Version => typeof(Program).Assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "0.8.1";
+    public static string Version => typeof(Program).Assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "0.9.0";
     public const string DisplayName = "Rika Translator（梨花翻译工具）";
     [STAThread]
     static void Main(string[] args)
@@ -20,6 +20,20 @@ internal static class Program
         var dataDirectory = Path.GetFullPath(Option("--data-dir") ?? Path.Combine(GameTranslateToolkit.Updates.UpdatePackage.ApplicationDirectory, "data"));
         try
         {
+            if (args.Contains("--stop-mcp"))
+            {
+                using var stopped = McpLifetime.StopConnections(UpdatePackage.ApplicationDirectory);
+                Thread.Sleep(300);
+                return;
+            }
+            if (args.Contains("--mcp"))
+            {
+                var mcpPort = int.TryParse(Option("--port"), out var selectedPort) ? selectedPort : 17865;
+                if (mcpPort is < 1024 or > 65535) { Environment.ExitCode = 1; return; }
+                try { Mcp.RikaMcpServer.RunAsync(mcpPort).GetAwaiter().GetResult(); }
+                catch { Console.Error.WriteLine("Rika MCP connection closed."); Environment.ExitCode = 1; }
+                return;
+            }
             if (Option("--make-tmp-job") is { } fontJob)
             {
                 try { FontMaking.TmpFontMakerWorker.Run(fontJob, UpdatePackage.ApplicationDirectory); }
@@ -47,6 +61,7 @@ internal static class Program
                 return;
             }
             if (port < 1024 || port > 65535) throw new ArgumentException("端口应为 1024–65535。");
+            using var mcpConnections = McpLifetime.AllowConnections(UpdatePackage.ApplicationDirectory);
             var vault = new SecretVault();
             var store = new DataStore(dataDirectory, vault);
             var logs = new LogService(dataDirectory);

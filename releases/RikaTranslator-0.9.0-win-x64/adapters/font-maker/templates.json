@@ -1,0 +1,50 @@
+[
+  {
+    "id": "2018",
+    "label": "Unity 2018",
+    "unityVersion": "2018.4.36f1",
+    "tmpVersion": "1.1.0",
+    "file": "tmp-2018.bundle",
+    "sha256": "2fc115318a5a36d6ee48832ebc7b09ba45377840856987291c14159cf79954dc"
+  },
+  {
+    "id": "2019",
+    "label": "Unity 2019",
+    "unityVersion": "2019.4.41f2",
+    "tmpVersion": "1.1.0",
+    "file": "tmp-2019.bundle",
+    "sha256": "a7e2feb38abb81a4b9e95e44cdd9ddbcd87808c8602c2bc9ddd3f1f2a7cc0543"
+  },
+  {
+    "id": "2020",
+    "label": "Unity 2020",
+    "unityVersion": "2020.3.49f1",
+    "tmpVersion": "1.1.0",
+    "file": "tmp-2020.bundle",
+    "sha256": "4c8c4e9ffb20b83a4a47dacaa5315a5a3be892c1944a9b99813d7b39b4050344"
+  },
+  {
+    "id": "2021",
+    "label": "Unity 2021",
+    "unityVersion": "2021.3.45f2c1",
+    "tmpVersion": "1.1.0",
+    "file": "tmp-2021.bundle",
+    "sha256": "247f258a21b9c44a44a7abe521461b6ef1474283b76ac15c91dc44ed48daa2bd"
+  },
+  {
+    "id": "2022",
+    "label": "Unity 2022",
+    "unityVersion": "2022.3.62f3",
+    "tmpVersion": "1.1.0",
+    "file": "tmp-2022.bundle",
+    "sha256": "489749103e6f6990e7ddbbb3f93a99d016c9b8af3c9dcfadd7ccc7ac62da5ce6"
+  },
+  {
+    "id": "6000",
+    "label": "Unity 6",
+    "unityVersion": "6000.4.0f1",
+    "tmpVersion": "1.1.0",
+    "file": "tmp-6000.bundle",
+    "sha256": "97784bd5e072b3a2905293149aab9bb130d3d28855f0981c5cade12ed3060a4a"
+  }
+]

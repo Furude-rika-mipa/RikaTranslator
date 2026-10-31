@@ -20,9 +20,13 @@ public static class ApiServer
         var galgame = new GalgameService(store, translation, runtime, logs);
         var online = new OnlineUpdateService(store.DirectoryPath, updates, logs);
         var fontMaker = new FontMaking.TmpFontMakerService(store.DirectoryPath, UpdatePackage.ApplicationDirectory, logs, updates.EnterMutation, updates.ExitMutation);
+        var scriptTranslation = new ScriptTranslation.ScriptTranslationService(store, translation, logs, UpdatePackage.ApplicationDirectory, updates.EnterMutation, updates.ExitMutation);
+        var externalMcpToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        logs.RegisterSecret(externalMcpToken);
         app.Lifetime.ApplicationStopping.Register(galgame.Dispose);
         app.Lifetime.ApplicationStopping.Register(online.Dispose);
         app.Lifetime.ApplicationStopping.Register(fontMaker.Dispose);
+        app.Lifetime.ApplicationStopping.Register(scriptTranslation.Dispose);
         app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
         {
             try
@@ -40,6 +44,7 @@ public static class ApiServer
             if (context.Connection.RemoteIpAddress is not { } remote || !IPAddress.IsLoopback(remote) || (request.Host.Host != "127.0.0.1" && request.Host.Host != "localhost") || request.Host.Port != port)
             { context.Response.StatusCode = 403; return; }
             var bridge = request.Path.StartsWithSegments("/bridge");
+            var externalMcp = request.Path.StartsWithSegments("/mcp-translation");
             var origin = request.Headers.Origin.ToString();
             if (!bridge && ((!string.IsNullOrEmpty(origin) && origin != expectedOrigin && origin != $"http://localhost:{port}") || request.Headers["Sec-Fetch-Site"] == "cross-site"))
             { context.Response.StatusCode = 403; return; }
@@ -52,17 +57,20 @@ public static class ApiServer
             }
             if (request.Path.StartsWithSegments("/api") && request.Path != "/api/session" && !SecureEquals(request.Headers["X-Toolkit-Token"].ToString(), uiToken))
             { context.Response.StatusCode = 401; await context.Response.WriteAsJsonAsync(new { error = "页面会话已失效，请重新打开工具。" }); return; }
+            if (externalMcp && request.Path != "/mcp-translation/session" && !SecureEquals(request.Headers["X-Rika-Mcp-Token"].ToString(), externalMcpToken))
+            { context.Response.StatusCode = 401; await context.Response.WriteAsJsonAsync(new { error = "外部翻译连接已失效。" }); return; }
             context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             context.Response.Headers["Referrer-Policy"] = "no-referrer";
             // UI resources change during local updates; an old script can hide new capabilities.
             context.Response.Headers.CacheControl = "no-store";
-            var mutation = bridge || (request.Path.StartsWithSegments("/api") && request.Method != "GET" && !request.Path.StartsWithSegments("/api/updates"));
+            var mutation = bridge || externalMcp && request.Method != "GET" || (request.Path.StartsWithSegments("/api") && request.Method != "GET" && !request.Path.StartsWithSegments("/api/updates"));
             bool entered = false;
             try { if (mutation) { updates.EnterMutation(); entered = true; } await next(); }
             catch (OperationCanceledException) { if (!context.Response.HasStarted) { context.Response.StatusCode = 408; await context.Response.WriteAsJsonAsync(new { error = "操作已取消或请求超时。" }); } }
             catch (Exception ex)
             {
-                var error = logs.Sanitize(ex.Message);
+                var error = externalMcp && ex is not (ArgumentException or InvalidOperationException or KeyNotFoundException)
+                    ? "外部翻译操作失败，请在梨花中检查任务与数据目录。" : logs.Sanitize(ex.Message);
                 var bridgeGameId = context.Items["ToolkitBridgeGameId"] as string;
                 var paused = ex is InvalidOperationException && (ex.Message is "翻译已暂停。" or "该游戏翻译已暂停。");
                 if (paused) error = ex.Message == "该游戏翻译已暂停。"
@@ -77,6 +85,14 @@ public static class ApiServer
         app.MapGet("/api/session", () => new { token = uiToken });
         app.MapGet("/api/fonts", FontCatalog.Installed);
         FontMaking.TmpFontMakerApi.Map(app, fontMaker);
+        ScriptTranslation.ScriptTranslationApi.Map(app, scriptTranslation, port);
+        app.MapGet("/mcp-translation/session", () => new { token = externalMcpToken });
+        app.MapGet("/mcp-translation/tasks", scriptTranslation.ExternalTasks);
+        app.MapGet("/mcp-translation/tasks/{id}", scriptTranslation.ExternalStatus);
+        app.MapPost("/mcp-translation/tasks/{id}/claim", scriptTranslation.ClaimExternal);
+        app.MapPost("/mcp-translation/tasks/{id}/submit", scriptTranslation.SubmitExternal);
+        app.MapPost("/mcp-translation/tasks/{id}/renew", scriptTranslation.RenewExternal);
+        app.MapPost("/mcp-translation/tasks/{id}/release", scriptTranslation.ReleaseExternal);
         app.MapGet("/api/updates/status", () => updates.Status());
         app.MapPost("/api/updates/pick", async () => new { path = await ToolkitWindow.PickUpdateAsync() });
         app.MapPost("/api/updates/inspect", async (JsonElement body, CancellationToken ct) =>
@@ -308,6 +324,7 @@ public static class ApiServer
         });
         app.MapDelete("/api/games/{id}", async (string id) =>
         {
+            if (scriptTranslation.HasActiveGame(id)) throw new InvalidOperationException("请先暂停或取消这个游戏的剧本任务，再移出游戏库。");
             var gate = gameLocks.GetOrAdd(id, _ => new SemaphoreSlim(1, 1)); await gate.WaitAsync();
             try {
             var game = FindGame(id);
