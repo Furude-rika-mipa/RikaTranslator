@@ -17,10 +17,18 @@ public static class ScriptTranslationApi
         app.MapPut("/api/script-translation/settings", service.UpdateSettingsAsync);
         app.MapGet("/api/script-translation/jobs", service.List);
         app.MapGet("/api/script-translation/games/{gameId}", service.Inspect);
+        app.MapGet("/api/script-translation/games/{gameId}/compatibility", service.ScriptCompatibility);
         app.MapPost("/api/script-translation/extract", (ScriptExtractionRequest request) => service.Extract(request));
         app.MapGet("/api/script-translation/jobs/{id}", service.Status);
+        app.MapGet("/api/script-translation/jobs/{id}/review", service.ReviewScript);
+        app.MapGet("/api/script-translation/jobs/{id}/identical-translations", service.FindIdenticalTranslations);
+        app.MapGet("/api/script-translation/jobs/{id}/segments/{segmentId}/location", service.LocateScriptLine);
+        app.MapGet("/api/script-translation/jobs/{id}/failed-selection", (string id, HttpRequest request) => service.FailedSelection(id,
+            request.Query["file"], request.Query["scene"], request.Query["q"]));
+        app.MapPut("/api/script-translation/jobs/{id}/segments/{segmentId}/translation", service.EditScriptLine);
         app.MapGet("/api/script-translation/jobs/{id}/segments", (string id, HttpRequest request) => service.Page(id,
-            request.Query["file"], request.Query["scene"], request.Query["q"], int.TryParse(request.Query["page"], out var page) ? page : 1));
+            request.Query["file"], request.Query["scene"], request.Query["q"], int.TryParse(request.Query["page"], out var page) ? page : 1,
+            request.Query["failedOnly"] == "true"));
         app.MapPost("/api/script-translation/jobs/{id}/translate", (string id, ScriptBatchRequest request) => service.Translate(id, request));
         app.MapPost("/api/script-translation/jobs/{id}/scope/preview", (string id, ScriptScopeRequest request) => service.PreviewScope(id, request));
         app.MapPost("/api/script-translation/jobs/{id}/scope/translate", (string id, ScriptScopeRequest request) => service.TranslateScope(id, request));

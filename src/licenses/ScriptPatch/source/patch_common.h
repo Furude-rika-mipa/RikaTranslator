@@ -54,12 +54,13 @@ inline std::string FileHash(const fs::path& file, unsigned long long maximum) {
     if (!input.eof()) throw std::runtime_error("read");
     return hash.Finish();
 }
-inline std::wstring Setting(const fs::path& root, const wchar_t* name) {
+inline std::wstring SectionSetting(const fs::path& root, const wchar_t* section, const wchar_t* name) {
     wchar_t value[512]{}; auto file = root / L"RikaPatch.ini";
-    auto size = GetPrivateProfileStringW(L"Patch", name, L"", value, 512, file.c_str());
+    auto size = GetPrivateProfileStringW(section, name, L"", value, 512, file.c_str());
     if (size >= 511) throw std::runtime_error("config");
     return value;
 }
+inline std::wstring Setting(const fs::path& root, const wchar_t* name) { return SectionSetting(root, L"Patch", name); }
 inline std::string Ascii(const std::wstring& text) {
     std::string result;
     for (auto c : text) { if (c > 127) throw std::runtime_error("ascii"); result += (char)c; }
@@ -74,6 +75,26 @@ inline fs::path CustomFont(const fs::path& root) {
 }
 struct Entry { std::string source, payloadHash, file; };
 inline std::vector<Entry> Map(const fs::path& root) {
+    // New patches keep the mapping in the existing configuration file. Older
+    // standalone patches continue to use their original patch-map.txt.
+    auto countText = Setting(root, L"MapCount");
+    if (!countText.empty()) {
+        if (!PlainFile(root / L"RikaPatch.ini") || countText.size() > 3 ||
+            !std::all_of(countText.begin(), countText.end(), [](wchar_t c) { return c >= L'0' && c <= L'9'; })) throw std::runtime_error("map");
+        int count = std::stoi(countText); if (count < 1 || count > 256) throw std::runtime_error("map");
+        std::vector<Entry> result;
+        for (int i = 1; i <= count; ++i) {
+            wchar_t number[5]{}; swprintf_s(number, L"%04d", i);
+            auto sourceName = std::wstring(L"Source") + number;
+            auto hashName = std::wstring(L"Hash") + number;
+            Entry entry{ Ascii(SectionSetting(root, L"Scripts", sourceName.c_str())),
+                         Ascii(SectionSetting(root, L"Scripts", hashName.c_str())), Ascii(number) + ".mdf" };
+            if (!Hex(entry.source) || !Hex(entry.payloadHash) ||
+                std::any_of(result.begin(), result.end(), [&](const Entry& e) { return e.source == entry.source; })) throw std::runtime_error("map");
+            result.push_back(entry);
+        }
+        return result;
+    }
     auto path = root / L"patch-map.txt";
     if (!PlainFile(path) || fs::file_size(path) > 65536) throw std::runtime_error("map");
     std::ifstream input(path); if (!input) throw std::runtime_error("map");

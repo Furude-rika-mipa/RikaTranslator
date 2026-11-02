@@ -7,6 +7,7 @@ internal static class ScriptBatchPolicy
 {
     public static void Validate(ScriptTranslationSettings settings, AppData data)
     {
+        if (settings.BatchLines is < 1 or > 50) throw new ArgumentException("API 每批对白数应为 1–50 条。");
         if (settings.Providers == null || settings.Providers.Count > 8 ||
             settings.Providers.Any(p => p == null || string.IsNullOrEmpty(p.ProviderId) || p.Concurrency is < 1 or > 8) ||
             settings.Providers.Select(p => p.ProviderId).Distinct().Count() != settings.Providers.Count ||
@@ -16,6 +17,9 @@ internal static class ScriptBatchPolicy
         if (settings.Providers.Any(p => !data.Providers.Any(provider => provider.Id == p.ProviderId)))
             throw new ArgumentException("分担列表中有已删除的服务，请重新选择并保存。");
     }
+
+    public static int BatchLines(AppData data) => data.Settings.ScriptTranslation?.BatchLines is >= 1 and <= 50
+        ? data.Settings.ScriptTranslation.BatchLines : 8;
 
     public static ScriptProviderSpec[] Resolve(AppData data, GameRecord game)
     {

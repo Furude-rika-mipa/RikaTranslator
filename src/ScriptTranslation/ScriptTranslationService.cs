@@ -9,7 +9,7 @@ namespace GameTranslateToolkit.ScriptTranslation;
 
 public sealed partial class ScriptTranslationService : IDisposable
 {
-    public const int SelectionLimit = 200;
+    public const int SelectionLimit = 1000;
     public const int McpBatchLimit = 50;
     private readonly DataStore _store;
     private readonly TranslationService _translation;
@@ -80,6 +80,8 @@ public sealed partial class ScriptTranslationService : IDisposable
         job.Engine, job.Format, patchSupported = SupportsScriptPatch(job),
         job.Resources, job.ScriptFiles, job.Scenes, job.Selected, job.Finished, job.Failed,
         total = job.Segments.Count, translated = job.Segments.Count(s => s.Status == "translated"),
+        pending = job.Segments.Count(s => s.Status == "pending"), queued = job.Segments.Count(s => s.Status == "queued"),
+        failedLines = job.Segments.Count(s => s.Status == "failed"),
         skipped = job.Segments.Count(s => s.Status == "skipped"), busy = Busy && _active == job.Id,
         job.ProviderName, job.Model, job.Scope, job.ScopeLabel,
         warnings = SupportsScriptPatch(job) ? job.Warnings.Where(w => !w.Contains("独立汉化补丁尚未适配", StringComparison.Ordinal)).ToArray() : job.Warnings.ToArray(),
@@ -92,18 +94,28 @@ public sealed partial class ScriptTranslationService : IDisposable
     };
     public object List() { lock (_gate) return _jobs.Values.OrderByDescending(j => j.CreatedAt).Select(Summary).ToArray(); }
     public object Status(string id) { lock (_gate) return Summary(Job(id)); }
-    public object Page(string id, string? file, string? scene, string? query, int page)
+    private static IEnumerable<ScriptSegment> MatchingRows(ScriptJob job, string? file, string? scene, string? query, bool failedOnly) =>
+        job.Segments.Where(s => (!failedOnly || s.Status == "failed") && (string.IsNullOrEmpty(file) || s.File == file) &&
+            (string.IsNullOrEmpty(scene) || s.Scene == scene) && (string.IsNullOrEmpty(query) ||
+             (s.Source + s.Translation + s.Speaker).Contains(query, StringComparison.OrdinalIgnoreCase)));
+    public object Page(string id, string? file, string? scene, string? query, int page, bool failedOnly = false)
     {
         lock (_gate)
         {
-            var rows = Job(id).Segments.Where(s => (string.IsNullOrEmpty(file) || s.File == file) &&
-                (string.IsNullOrEmpty(scene) || s.Scene == scene) && (string.IsNullOrEmpty(query) ||
-                 (s.Source + s.Translation + s.Speaker).Contains(query, StringComparison.OrdinalIgnoreCase))).ToArray();
+            var rows = MatchingRows(Job(id), file, scene, query, failedOnly).ToArray();
             page = Math.Clamp(page, 1, Math.Max(1, (rows.Length + 49) / 50));
             return new { page, pages = Math.Max(1, (rows.Length + 49) / 50), total = rows.Length,
                 scenes = Job(id).Segments.Where(s => string.IsNullOrEmpty(file) || s.File == file).Select(s => s.Scene).Distinct().Order().ToArray(),
                 items = rows.Skip((page - 1) * 50).Take(50).Select(s => new { s.Id, s.File, s.Scene, s.Index, s.Speaker,
                     s.Source, s.Translation, s.Status, s.Error, s.ProviderName, s.Model, s.Attempts }).ToArray() };
+        }
+    }
+    public object FailedSelection(string id, string? file, string? scene, string? query)
+    {
+        lock (_gate)
+        {
+            var matches = MatchingRows(Job(id), file, scene, query, true).ToArray();
+            return new { total = matches.Length, ids = matches.Take(SelectionLimit).Select(s => s.Id).ToArray() };
         }
     }
     private GameRecord Game(string id) => _store.Snapshot().Games.FirstOrDefault(g => g.Id == id) ?? throw new InvalidOperationException("请先在游戏库添加并选择游戏。");
@@ -334,10 +346,11 @@ public sealed partial class ScriptTranslationService : IDisposable
         var providers = ScriptBatchPolicy.Resolve(data, game);
         var stamp = ScriptBatchPolicy.Stamp(data, game);
         var unique = selected.Select(s => s.Source).Distinct(StringComparer.Ordinal).ToArray();
-        var batches = ScriptBatchPolicy.Batches(selected).Count;
+        var batchLines = ScriptBatchPolicy.BatchLines(data);
+        var batches = ScriptBatchPolicy.Batches(selected, batchLines).Count;
         var fingerprint = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new {
             job.Id, request.Scope, file = request.Scope == "file" ? request.File : null,
-            stamp, ids = selected.Select(s => s.Id)
+            stamp, batchLines, ids = selected.Select(s => s.Id)
         }))).ToLowerInvariant();
         var label = request.Scope == "all" ? "整个任务的全部待译对白" : request.Scope == "resume" ? "上次选择的范围" : "剧本 " + request.File;
         return (new(request.Scope, request.Scope == "file" ? request.File : null, label, selected.Length, unique.Length,
@@ -391,7 +404,8 @@ public sealed partial class ScriptTranslationService : IDisposable
                 job.Stage = "translating"; job.Selected = selected.Length; job.Finished = 0; job.Failed = 0;
                 foreach (var segment in selected) { segment.Status = "queued"; segment.Error = ""; }
                 job.Message = $"本次范围：{label}，共 {selected.Length} 条；其他范围不提交。"; Save(job);
-                _work = Task.Run(() => TranslateAsync(job, selected, providers, stamp, _stop.Token));
+                var batchLines = ScriptBatchPolicy.BatchLines(data);
+                _work = Task.Run(() => TranslateAsync(job, selected, providers, stamp, batchLines, _stop.Token));
                 return Summary(job);
             }
             catch { _end(); throw; }

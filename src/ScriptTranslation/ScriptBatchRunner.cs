@@ -51,9 +51,13 @@ public sealed partial class ScriptTranslationService
         var remaining = batch.Where(g => g.First().Status != "translated").ToList();
         if (remaining.Count == 0) return;
         var tried = new HashSet<string>(StringComparer.Ordinal);
+        TranslationApiException? lastFailure = null;
         while (true)
         {
-            var (spec, next) = await _limiter.AcquireAsync(providers, tried, ct);
+            ScriptProviderSpec spec; DateTimeOffset next;
+            try { (spec, next) = await _limiter.AcquireAsync(providers, tried, ct); }
+            catch (InvalidOperationException) when (lastFailure != null)
+            { throw new InvalidOperationException("本批可用服务已用尽。最近一次：" + lastFailure.Message, lastFailure); }
             TranslationApiException? apiFailure = null;
             var progress = job.Providers.First(p => p.ProviderId == spec.ProviderId);
             var counted = false;
@@ -73,6 +77,7 @@ public sealed partial class ScriptTranslationService
             catch (TranslationApiException ex)
             {
                 apiFailure = ex;
+                lastFailure = ex;
                 lock (_gate) { progress.Failures++; job.Message = $"{progress.Name} 暂不可用，正在尝试其他参与服务；已完成译文保留。"; }
                 _logs.Write("warning", "script-translation", "本批 API 请求失败，将尝试其他参与服务。", job.GameId,
                     details: new { providerId = spec.ProviderId, retryable = ex.Retryable });
@@ -97,9 +102,9 @@ public sealed partial class ScriptTranslationService
         }
     }
 
-    private async Task TranslateAsync(ScriptJob job, ScriptSegment[] selected, ScriptProviderSpec[] providers, string stamp, CancellationToken ct)
+    private async Task TranslateAsync(ScriptJob job, ScriptSegment[] selected, ScriptProviderSpec[] providers, string stamp, int batchLines, CancellationToken ct)
     {
-        var batches = ScriptBatchPolicy.Batches(selected);
+        var batches = ScriptBatchPolicy.Batches(selected, batchLines);
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var next = -1; var failures = 0; string? stoppedFor = null;
         async Task Worker()
@@ -116,12 +121,14 @@ public sealed partial class ScriptTranslationService
                         Interlocked.Exchange(ref failures, 0);
                     }
                     catch (OperationCanceledException) { throw; }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
+                        var reason = ex is InvalidOperationException && ex.Message.Length is > 0 and <= 200
+                            ? _logs.Sanitize(ex.Message) : "本批翻译失败，请查看运行日志。";
                         lock (_gate)
                         {
                             foreach (var item in batches[index].SelectMany(g => g).Where(s => s.Status != "translated"))
-                            { item.Status = "failed"; item.Error = "本批翻译失败或分句校验未通过，可重试失败项。"; job.Failed++; }
+                            { item.Status = "failed"; item.Error = reason; job.Failed++; }
                             Save(job);
                         }
                         CheckConfiguration(job, stamp);

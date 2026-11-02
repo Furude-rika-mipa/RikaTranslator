@@ -194,11 +194,21 @@ public sealed partial class ScriptTranslationService
                         if (PatchHash(bytes) != component.Value) throw new InvalidDataException("补丁组件在生成时发生变化，请重试。");
                         File.WriteAllBytes(Path.Combine(root, component.Key), bytes);
                     }
-                    File.WriteAllText(Path.Combine(root, build.ResourcePatch ? "resource-map.txt" : "patch-map.txt"), map.ToString(), build.ResourcePatch ? Encoding.Unicode : Encoding.ASCII);
+                    if (build.ResourcePatch) File.WriteAllText(Path.Combine(root, "resource-map.txt"), map.ToString(), Encoding.Unicode);
                     if (build.ResourcePatch) File.WriteAllBytes(Path.Combine(root, "character-map.bin"), build.CharacterMap ?? []);
                     var fontName = build.FontBytes == null ? "" : "custom" + Path.GetExtension(build.Plan.FontFile);
                     if (build.FontBytes != null) { Directory.CreateDirectory(Path.Combine(root, "font")); File.WriteAllBytes(Path.Combine(root, "font", fontName), build.FontBytes); }
                     File.WriteAllText(Path.Combine(root, "RikaPatch.ini"), $"[Patch]\r\nFormat=1\r\nGame={build.Plan.GameExecutable}\r\nGameSha256={build.GameHash}\r\nPatchDllSha256={build.Components["RikaScriptPatch.dll"]}\r\nChineseFont={(request.ChineseFont ? 1 : 0)}\r\nFontFamily={build.Plan.FontFamily}\r\nFontFile={fontName}\r\nFontSha256={(build.FontBytes == null ? "" : PatchHash(build.FontBytes))}\r\nDiagnostics=0\r\n", Encoding.Unicode);
+                    if (!build.ResourcePatch)
+                    {
+                        var settings = new StringBuilder($"MapCount={build.Files.Count}\r\n[Scripts]\r\n");
+                        for (var i = 0; i < build.Files.Count; i++)
+                        {
+                            var number = (i + 1).ToString("D4"); var file = build.Files[i];
+                            settings.Append($"Source{number}={file.SourceHash}\r\nHash{number}={file.PayloadHash}\r\n");
+                        }
+                        File.AppendAllText(Path.Combine(root, "RikaPatch.ini"), settings.ToString(), Encoding.Unicode);
+                    }
                     UpdatePackage.WriteJson(Path.Combine(root, "patch-manifest.json"), new { format = "rika-kirikiri-patch-1", version = 1,
                         gameExecutable = build.Plan.GameExecutable, gameSha256 = build.GameHash, build.Plan.Translated, build.Plan.Total,
                         build.Plan.Remaining, chineseFont = request.ChineseFont, build.Plan.FontFamily, fontFile = fontName,

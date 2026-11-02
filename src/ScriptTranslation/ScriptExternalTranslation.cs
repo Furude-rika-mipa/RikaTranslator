@@ -61,7 +61,7 @@ public sealed partial class ScriptTranslationService
         if (request.Scope == "selected")
         {
             if (request.Ids == null || request.Ids.Count is < 1 or > SelectionLimit || request.Ids.Distinct().Count() != request.Ids.Count)
-                throw new ArgumentException("请明确勾选 1–200 条对白。");
+                throw new ArgumentException($"请明确勾选 1–{SelectionLimit} 条对白。");
             var ids = request.Ids.ToHashSet(); range = job.Segments.Where(s => ids.Contains(s.Id)).ToArray();
             if (range.Length != ids.Count) throw new ArgumentException("勾选的对白不属于此任务。");
         }

@@ -130,7 +130,12 @@ public sealed partial class PsbScenarioReader
                     if (!translated.TryGetValue(id, out var line)) { preserved++; continue; }
                     if (line.Status != "translated" || line.Source != source || string.IsNullOrWhiteSpace(line.Translation) || line.Translation.Length > 32768 ||
                         line.Translation.Any(c => c == '\0')) throw new InvalidDataException("译文与原始剧本不一致，请重新提取核对；没有生成补丁。");
-                    var value = TranslationService.ValidateManualTranslation(source, line.Translation);
+                    string value;
+                    try { value = TranslationService.ValidatePsbPatchTranslation(source, line.Translation); }
+                    catch (InvalidOperationException ex)
+                    {
+                        throw new InvalidOperationException($"剧本 {line.File} · {line.Scene} · 第 {line.Index} 条：{ex.Message} 可使用“检查译文”查看原文和译文。", ex);
+                    }
                     if (!appended.TryGetValue(value, out var index)) { index = values.Count; values.Add(value); appended.Add(value, index); }
                     node.StringIndex = index; changed++;
                 }

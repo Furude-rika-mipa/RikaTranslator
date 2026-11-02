@@ -79,6 +79,16 @@ public sealed partial class TranslationService
             Force = true
         }, useCache: false, persist: false, test: true, ct);
 
+    // A PSB patch can use the game's automatic wrapping after all explicit line breaks
+    // have been removed from a translation. Keep every other token protected.
+    public static string ValidatePsbPatchTranslation(string source, string edited)
+    {
+        static bool IsLineBreak(Match match) => match.Value is "\\n" or "\r\n" or "\r" or "\n";
+        if (!ProtectedParts.Matches(edited).Cast<Match>().Any(IsLineBreak))
+            source = ProtectedParts.Replace(source, match => IsLineBreak(match) ? "" : match.Value);
+        return ValidateManualTranslation(source, edited);
+    }
+
     /// <summary>Apply the same format protection to user edits and restore textarea-normalized line breaks.</summary>
     public static string ValidateManualTranslation(string source, string edited)
     {

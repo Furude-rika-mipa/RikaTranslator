@@ -24,13 +24,14 @@ public class AppSettings
     public int McpBatchLines { get; set; } = 8;
     public ScriptTranslationSettings ScriptTranslation { get; set; } = new();
     public string Theme { get; set; } = "system";
-    public string Accent { get; set; } = "#3b82f6";
+    public string Accent { get; set; } = "#8063c5";
     public int Zoom { get; set; } = 100;
 }
 
 public sealed class ScriptTranslationSettings
 {
     public bool MultiProvider { get; set; }
+    public int BatchLines { get; set; } = 8;
     public List<ScriptProviderLimit> Providers { get; set; } = [];
 }
 

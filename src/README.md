@@ -1,6 +1,8 @@
-﻿# Rika Translator（梨花翻译工具）0.9.0
+﻿# Rika Translator（梨花翻译工具）0.9.1
 
 Windows 10/11 x64 桌面工具。界面参考 XUnity Toolkit 的游戏库、侧边导航和分组卡片，支持用户自己的 OpenAI 兼容 API。当前是第一版试用构建，具体游戏兼容性需逐项验证。
+
+0.9.1 优化淡紫色界面与任务布局；剧本页新增失败筛选、原译文完全相同的检查、控制符和长句提醒，以及手动定位和修订单条译文。AI API 批次可设置 1–50 条，手动勾选最多 1000 条；任务支持跨页选择失败项。检查只提供提示，不自动修改译文。游戏详情可查看诊断建议与剧本兼容信息。
 
 0.9.0 新增“剧本翻译”：对受支持的 32 位 KiriKiri / Hxv4 游戏建立不含存档的临时副本，提取 PSB 场景对白；默认不选中、不调用 AI。可以勾选少量对白，也可以预览并确认后翻译当前剧本或全部待译。复用游戏已有服务与词表，支持暂停、保留进度、失败重试，以及导出已译 JSON / TXT、生成独立汉化补丁。临时副本需要额外磁盘空间，完成或取消后清理。当前已验证 DC5t4LM 的剧本读取，其他游戏逐项验证。
 
@@ -144,7 +146,7 @@ ZIP 内最外层目录为 RikaTranslator-同版本-win-x64，保留 runtime、ww
 
 ## 构建与验证
 
-在 Windows 上安装 .NET 10 SDK 后执行 `./build.ps1 -LooseHookSource`。发布目录为 `dist/RikaTranslator-0.9.0-win-x64`，包含主程序、独立更新程序及独立 GPL Hook 程序。DLL 保持在 `runtime`，Luna 原生组件位于 `adapters/galgame/native`。输出目录必须为空，避免遗留旧 DLL；`-FlatLayout -Version 0.5.1` 用于制作旧版本兼容的过渡发布。
+在 Windows 上安装 .NET 10 SDK 后执行 `./build.ps1 -LooseHookSource`。发布目录为 `dist/RikaTranslator-0.9.1-win-x64`，包含主程序、独立更新程序及独立 GPL Hook 程序。DLL 保持在 `runtime`，Luna 原生组件位于 `adapters/galgame/native`。输出目录必须为空，避免遗留旧 DLL；`-FlatLayout -Version 0.5.1` 用于制作旧版本兼容的过渡发布。
 
 自动化使用合成文本、模拟 OpenAI 兼容服务与临时游戏目录。另经用户许可，在 Lunar 的独立副本验证 Unity 2022.3.62f2 IL2CPP 的加载、取词和译文回传，翻译服务仅为本机模拟接口。具体画面与字体结果、验证边界见 `测试记录.md`。
 

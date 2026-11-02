@@ -64,6 +64,7 @@ public sealed class ScriptProviderProgress
 public sealed record ScriptProviderSpec(string ProviderId, string Name, string Model, int Concurrency);
 public sealed record ScriptExtractionRequest(string GameId, string Archive);
 public sealed record ScriptBatchRequest(List<string> Ids, bool Confirmed);
+public sealed record ScriptLineEdit(string Translation, string Expected, bool Confirmed);
 public sealed record ScriptScopeRequest(string Scope, string? File = null, string? Fingerprint = null, bool Confirmed = false);
 public sealed record ScriptScopePlan(string Scope, string? File, string Label, int Lines, int UniqueLines,
     long Characters, int Completed, int Skipped, int Batches, string ProviderName, string Model, string Configuration, string Fingerprint,

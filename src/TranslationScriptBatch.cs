@@ -52,9 +52,9 @@ public sealed partial class TranslationService
         ScriptProviderSpec provider, IReadOnlyList<string> sources, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (sources.Count is < 1 or > 8 || sources.Any(s => string.IsNullOrWhiteSpace(s) || s.Length > 4096) ||
+        if (sources.Count is < 1 or > 50 || sources.Any(s => string.IsNullOrWhiteSpace(s) || s.Length > 4096) ||
             sources.Distinct().Count() != sources.Count || sources.Sum(s => s.Length) > PrefetchCharacters)
-            throw new ArgumentException("剧本请求需要 1–8 条完整对白、共不超过 8192 字符。");
+            throw new ArgumentException("剧本请求需要 1–50 条完整对白、共不超过 8192 字符。");
         var (data, _) = ScriptSnapshot(gameId, configuration);
         var prepared = sources.Select(source => {
             var context = PrepareRequest(new TranslateInput { GameId = gameId, Text = source, ProviderId = provider.ProviderId },
