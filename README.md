@@ -4,7 +4,7 @@ Windows 游戏翻译工具，支持实时取词、用户自己的 AI 服务，�
 
 ## 下载
 
-从 [Releases](https://github.com/Furude-rika-mipa/RikaTranslator/releases/tag/v0.9.1) 下载 [完整程序 ZIP](https://github.com/Furude-rika-mipa/RikaTranslator/releases/download/v0.9.1/RikaTranslator-0.9.1-win-x64.zip)，解压后运行 `RikaTranslator.exe`。也可查看仓库中的[完整程序目录](releases/RikaTranslator-0.9.1-win-x64/)。
+从 [Releases](https://github.com/Furude-rika-mipa/RikaTranslator/releases/tag/v0.9.1) 下载 [完整程序 ZIP](https://github.com/Furude-rika-mipa/RikaTranslator/releases/download/v0.9.1/RikaTranslator-0.9.1-win-x64.zip)，解压后运行 `RikaTranslator.exe`。
 
 0.7.7 及更新版本可在“设置 → 程序更新”检查、下载并安装。更新会保留本地 `data`，首次运行将创建自己的配置。需要 Microsoft Edge WebView2 Runtime。
 
